@@ -93,6 +93,21 @@ final class QUICChannelStreamHandler: ProtocolInstanceContainer, InboundStreamHa
     private var logPrefix: String = ""
     private var bufferedReadData: ByteBuffer = ByteBuffer()
     private var bufferedWriteData: TinyArray<ByteBuffer> = []
+
+    /// A flag that is `true` when the downstream consumer has requested a read that has not yet been satisfied.
+    ///
+    /// This flag is set by the `read0()` method and cleared by the `streamRead()` method once inbound data has actually
+    /// been delivered down the pipeline. When `false`, `handleInboundDataAvailableEvent()` leaves inbound data residing
+    /// in SwiftNetwork's stream buffer so that its flow-control mechanisms have more accurate signals about the rate at
+    /// which this endpoint is consuming inbound data.
+    private var pendingRead: Bool = false
+
+    /// Whether the `autoRead` channel option is enabled. This value is inherited from the parent connection channel.
+    /// When `true`, `self.pipeline.read()` is called after every `channelReadComplete` to keep data flowing.
+    ///
+    /// Defaults to `true`. This value can be updated by calling `setOption`.
+    private var autoRead: Bool = true
+
     private var originalMetadata: ProtocolMetadata<QUICProtocol>?
     private var connectedEventHandler: ((QUICStreamID?) -> Void)?
     private var disconnectedEventHandler: ((NetworkError?) -> Void)?
@@ -394,11 +409,12 @@ final class QUICChannelStreamHandler: ProtocolInstanceContainer, InboundStreamHa
                     switch self.pipelineStateMachine.markInitializerComplete() {
                     case .surfaceInitializedStream:
                         continuation.yield(output: output, channel: self)
-                        self.streamRead()
+                        self.tryToAutoRead()
                     case .ignoreAlreadyComplete:
                         break
                     }
-                case .failure:
+                case .failure(let error):
+                    self.logger.error("Inbound stream failed to initialize", metadata: ["error": "\(error)"])
                     self.close(promise: nil)
                 }
             }
@@ -416,12 +432,12 @@ final class QUICChannelStreamHandler: ProtocolInstanceContainer, InboundStreamHa
                 switch self.pipelineStateMachine.markInitializerComplete() {
                 case .surfaceInitializedStream:
                     context.fireChannelRead(QUICConnectionChannelHandler.wrapInboundOut(self))
-                    self.streamRead()
+                    self.tryToAutoRead()
                 case .ignoreAlreadyComplete:
                     break
                 }
             case .failure(let error):
-                self.logger.error("Inbound stream failed to initialize: \(error)")
+                self.logger.error("Inbound stream failed to initialize", metadata: ["error": "\(error)"])
                 self.close(promise: nil)
             }
         }
@@ -433,7 +449,7 @@ final class QUICChannelStreamHandler: ProtocolInstanceContainer, InboundStreamHa
         switch self.pipelineStateMachine.markInitializerComplete() {
         case .surfaceInitializedStream:
             context.fireChannelRead(QUICConnectionChannelHandler.wrapInboundOut(self))
-            self.streamRead()
+            self.tryToAutoRead()
         case .ignoreAlreadyComplete:
             break
         }
@@ -512,34 +528,69 @@ final class QUICChannelStreamHandler: ProtocolInstanceContainer, InboundStreamHa
         }
     }
 
+    /// Drains SwiftNetwork's stream buffer and delivers bytes downstream, but only when there is an outstanding read
+    /// request from the downstream consumer, i.e. `self.pendingRead == true`.
+    ///
+    /// When there is no demand, we leave bytes inside SwiftNetwork's buffer as SwiftNetwork uses its buffer occupancy
+    /// to drive flow control. If we always drained it, SwiftNetwork would think the data has been consumed and keep
+    /// advancing its flow control window, defeating backpressure and letting unbounded bytes accumulate here.
+    private func deliverInboundDataDownstreamIfDemand() {
+        // Only continue if there is a pending read.
+        guard self.pendingRead else {
+            return
+        }
+
+        // Pull the latest bytes out of SwiftNetwork into `self.bufferedReadData`.
+        let bytesRead = self.read()
+        if bytesRead > 0 {
+            self.log("buffered \(bytesRead) bytes from inbound data available event")
+        }
+
+        self.streamRead()
+    }
+
     // Called when data is available to be read on the stream
     // NOTE: New flows with a single read with not get this event and should optimistically read when the flow is started.
     // This event will be called for all future input available after the flow starts.
     internal func handleInboundDataAvailableEvent(_ from: ProtocolInstanceReference) {
         switch self.streamStateMachine.inboundDataAvailable() {
         case .readData:
-            log("received input room available")
-            // Read immediately to buffer any available data; it will be drained by `readDataForStream`
-            // when the application reads.
-            let bytesRead = self.read()
-            if bytesRead > 0 {
-                self.log("buffered \(bytesRead) bytes from inbound data available event")
-            }
-            streamRead()
+            self.log("received input room available")
+            self.deliverInboundDataDownstreamIfDemand()
+
         case .doNotRead:
             break
+        }
+    }
+
+    /// Fires `channelReadComplete` down the pipeline and then attempts issuing a read event on the pipeline.
+    private func fireChannelReadComplete() {
+        self.log("ChildChannel fire channel read complete")
+        self.pipeline.fireChannelReadComplete()
+
+        self.tryToAutoRead()
+    }
+
+    /// Issues a `read()` on the pipeline if `autoRead` is enabled and there is no outstanding read request.
+    func tryToAutoRead() {
+        if self.autoRead, !self.pendingRead {
+            self.pipeline.read()
         }
     }
 
     func streamRead() {
         self.eventLoop.preconditionInEventLoop()
         if self.bufferedReadData.readableBytes > 0 {
+            // We will now satisfy a pending read request. Reset the flag.
+            self.pendingRead = false
+
             let bytesRead = bufferedReadData.readableBytes
             self.log(
                 "Read \(bytesRead) bytes from stream"
             )
             self.pipeline.fireChannelRead(bufferedReadData)
             bufferedReadData.clear()
+            self.fireChannelReadComplete()
         }
         switch self.streamStateMachine.completeRead() {
         case .reportFin(let streamFullyClosed):
@@ -555,8 +606,6 @@ final class QUICChannelStreamHandler: ProtocolInstanceContainer, InboundStreamHa
         case .nothingToReport:
             break
         }
-        // Make sure read complete is called after everything has run.
-        self.pipeline.fireChannelReadComplete()
     }
 
     internal func handleOutboundRoomAvailableEvent(_ from: ProtocolInstanceReference) {
@@ -963,6 +1012,9 @@ extension QUICChannelStreamHandler: Channel, ChannelCore {
         if option is ChannelOptions.Types.HalfCloseOnStopSendingChannelOption {
             return self.understandsStopSending as! Option.Value
         }
+        if option is ChannelOptions.Types.AutoReadOption {
+            return self.autoRead as! Option.Value
+        }
         fatalError()
     }
 
@@ -980,6 +1032,10 @@ extension QUICChannelStreamHandler: Channel, ChannelCore {
         self.eventLoop.preconditionInEventLoop()
         if option is ChannelOptions.Types.HalfCloseOnStopSendingChannelOption {
             self.understandsStopSending = value as! Bool
+            return
+        }
+        if option is ChannelOptions.Types.AutoReadOption {
+            self.autoRead = value as! Bool
             return
         }
         fatalError()
@@ -1065,7 +1121,12 @@ extension QUICChannelStreamHandler: Channel, ChannelCore {
 
     @inlinable
     func read0() {
-        // do nothing
+        self.eventLoop.preconditionInEventLoop()
+        self.log("ChildChannel read0")
+
+        self.pendingRead = true
+        // Try to satisfy the read immediately if there is data already buffered in SwiftNetwork.
+        self.deliverInboundDataDownstreamIfDemand()
     }
 
     private func _close(error: (any Error)?, promise: EventLoopPromise<Void>?) {
@@ -1247,5 +1308,16 @@ extension QUICChannelStreamHandler: Channel, ChannelCore {
     @inlinable
     func connect0(to: SocketAddress, promise: EventLoopPromise<Void>?) {
         fatalError("not implemented \(#function)")
+    }
+}
+
+@available(anyAppleOS 26, *)
+extension QUICChannelStreamHandler {
+    /// Appends bytes directly into the NIO read buffer.
+    ///
+    /// - Note: This method is intended to only be used in tests to simulate a live peer sending data over the network.
+    internal func _testOnly_appendToBufferedReadData(_ buffer: ByteBuffer) {
+        self.eventLoop.preconditionInEventLoop()
+        self.bufferedReadData.writeImmutableBuffer(buffer)
     }
 }
