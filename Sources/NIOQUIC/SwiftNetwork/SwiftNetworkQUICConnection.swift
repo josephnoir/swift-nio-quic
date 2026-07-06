@@ -877,6 +877,8 @@ final class SwiftNetworkQUICConnection {
             connectionNewFlowHandler.teardown()
         }
         self.connectionNewFlowHandler = nil
+        // Break cycle with outputHandler, which holds closures that capture self, i.e., the connection.
+        self.outputHandler.clearHandlers()
     }
 
     /// Action returned by `close()` indicating what happened.
@@ -899,6 +901,12 @@ final class SwiftNetworkQUICConnection {
             log("close() returning early - already terminating")
             return .alreadyClosed
         }
+
+        // Capture before initiateClose() below mutates the state machine. A `.connecting`
+        // connection transitions straight to `.closed`, and `hasEstablishedConnection`
+        // reports `true` for `.closed` unconditionally - so reading it afterwards would
+        // always say "established" even for a connection that never left `.connecting`.
+        let hasEstablishedConnection = self.connectionStateMachine.hasEstablishedConnection
 
         // Transition state machine to closing state FIRST, before SwiftNetwork cleanup
         // This is crucial because newFlowHandler.stop() synchronously fires disconnected event
@@ -935,7 +943,7 @@ final class SwiftNetworkQUICConnection {
 
         // For connections that never established (still in idle or early handshake states),
         // clean up synchronously.
-        if !self.connectionStateMachine.hasEstablishedConnection {
+        if !hasEstablishedConnection {
             // Never established - clean up synchronously
             self.tearDownConnectionState()
             assert(
