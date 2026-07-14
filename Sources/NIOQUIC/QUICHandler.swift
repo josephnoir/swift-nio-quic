@@ -280,8 +280,10 @@ public final class QUICHandler {
         remoteAddress: SocketAddress,
         connectionInitializer: @escaping @Sendable (any Channel, QUICStreamCreator) -> EventLoopFuture<Void>,
         inboundStreamInitializer: @escaping @Sendable (any Channel) -> EventLoopFuture<Void>
-    ) -> EventLoopFuture<any Channel> {
+    ) -> EventLoopFuture<(any Channel, QUICStreamCreator)> {
         let channelPromise = self.eventLoop.makePromise(of: (any Channel).self)
+        let creatorPromise = self.eventLoop.makePromise(of: QUICStreamCreator.self)
+        channelPromise.futureResult.cascadeFailure(to: creatorPromise)
 
         do {
             let role = self.quicConfiguration.role
@@ -316,14 +318,15 @@ public final class QUICHandler {
 
                     return (channel, connectionChannelHandler.makeStreamCreator(role: .client))
                 }.flatMap { channel, streamCreator in
-                    connectionInitializer(channel, streamCreator)
+                    creatorPromise.succeed(streamCreator)
+                    return connectionInitializer(channel, streamCreator)
                 }
             }
         } catch {
             channelPromise.fail(error)
         }
 
-        return channelPromise.futureResult
+        return channelPromise.futureResult.and(creatorPromise.futureResult)
     }
 
     /// Shuts the server down gracefully.
