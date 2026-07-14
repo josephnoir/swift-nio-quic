@@ -401,15 +401,15 @@ public final class QUICHandler {
                 return logger
             }()
             // The context is set when the channel becomes active so force unwrapping is okay here
-            let quicConnection = try SwiftNetworkQUICConnection(
+            let quicConnection = try SwiftNetworkQUICConnection.client(
                 configuration: self.quicConfiguration,
                 sourceConnectionID: sourceConnectionID,
                 serverName: serverName,
                 asyncVerifier: asyncVerifierRunner?.asyncVerifier,
                 localAddress: localAddress,
                 remoteAddress: remoteAddress,
-                logger: connectionLogger,
-                eventLoop: self.context!.eventLoop
+                eventLoop: self.context!.eventLoop,
+                logger: connectionLogger
             )
 
             // Register callback for handling new inbound connection IDs
@@ -789,7 +789,7 @@ extension QUICHandler: ChannelInboundHandler {
 
         connectionLogger.trace("QUICHandler accepting new connection")
         // The context is set when the channel becomes active so force unwrapping is okay here
-        let quicConnection = try SwiftNetworkQUICConnection(
+        let quicConnection = try SwiftNetworkQUICConnection.server(
             configuration: self.quicConfiguration,
             sourceConnectionID: newSourceConnectionID,
             authenticator: self.authenticator,
