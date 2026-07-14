@@ -24,31 +24,15 @@ import XCTest
 
 @testable import NIOQUIC
 
-/// Reads in quic stream channels, runs the inboundStreamInitializer on them, then passes them down
+/// Holds the stream creator so tests can open outbound streams on a connection.
 @available(anyAppleOS 26, *)
 final class HTTPConnectionHandler: ChannelInboundHandler {
-    typealias InboundIn = any Channel  // stream channels
-    typealias InboundOut = any Channel  // Pass through the stream channels
+    typealias InboundIn = NIOAny
 
     fileprivate let streamCreator: NIOQUIC.QUICStreamCreator
-    private let inboundStreamInitializer: @Sendable (any Channel) throws -> Void
 
-    init(
-        streamCreator: NIOQUIC.QUICStreamCreator,
-        inboundStreamInitializer: @Sendable @escaping (any Channel) throws -> Void
-    ) {
+    init(streamCreator: NIOQUIC.QUICStreamCreator) {
         self.streamCreator = streamCreator
-        self.inboundStreamInitializer = inboundStreamInitializer
-    }
-
-    func channelRead(context: ChannelHandlerContext, data: NIOAny) {
-        let streamChannel = self.unwrapInboundIn(data)
-        do {
-            try self.inboundStreamInitializer(streamChannel)
-            context.fireChannelRead(data)
-        } catch {
-            context.fireErrorCaught(error)
-        }
     }
 
     func createRequestStream<InitializerOutput: Sendable>(
@@ -56,59 +40,6 @@ final class HTTPConnectionHandler: ChannelInboundHandler {
             @escaping @Sendable (NIOQUICHelpers.QUICStreamInitializerParameters) -> EventLoopFuture<InitializerOutput>
     ) -> EventLoopFuture<InitializerOutput> {
         self.streamCreator.createBidirectionalStream(streamInitializer: streamInitializer)
-    }
-}
-
-/// This channel gives a connection error as soon as it reads an inbound quic stream
-@available(anyAppleOS 26, *)
-final class RejectEverythingHTTPConnectionHandler: ChannelInboundHandler {
-    typealias InboundIn = any Channel  // stream channels
-    typealias InboundOut = any Channel  // Pass through the stream channels
-
-    func channelRead(context: ChannelHandlerContext, data: NIOAny) {
-        // immediately close the connection when we get a new inbound stream
-        context.triggerUserOutboundEvent(
-            NIOQUICHelpers.QUICCloseConnectionEvent(
-                code: NIOQUICHelpers.QUICApplicationErrorCode(10)!,
-                reasonPhrase: "test"
-            ),
-            promise: nil
-        )
-        context.fireChannelRead(data)
-    }
-}
-
-/// This channel immediately sends STOP_SENDING (with code 10) on every inbound stream.
-@available(anyAppleOS 26, *)
-final class StreamClosingHTTPConnectionHandler: ChannelInboundHandler {
-    typealias InboundIn = any Channel  // stream channels
-    typealias InboundOut = any Channel  // Pass through the stream channels
-
-    func channelRead(context: ChannelHandlerContext, data: NIOAny) {
-        // immediately close the stream when we get a new inbound stream
-        let inboundStream = self.unwrapInboundIn(data)
-        inboundStream.triggerUserOutboundEvent(
-            NIOQUICHelpers.QUICStopSendingEvent(code: NIOQUICHelpers.QUICApplicationErrorCode(10)!),
-            promise: nil
-        )
-        context.fireChannelRead(data)
-    }
-}
-
-/// This channel immediately fires a RESET\_STREAM (with code 10) on every inbound stream.
-@available(anyAppleOS 26, *)
-final class StreamResettingHTTPConnectionHandler: ChannelInboundHandler {
-    typealias InboundIn = any Channel  // stream channels
-    typealias InboundOut = any Channel  // Pass through the stream channels
-
-    func channelRead(context: ChannelHandlerContext, data: NIOAny) {
-        // immediately close the stream when we get a new inbound stream
-        let inboundStream = self.unwrapInboundIn(data)
-        inboundStream.triggerUserOutboundEvent(
-            NIOQUICHelpers.QUICResetStreamEvent(code: NIOQUICHelpers.QUICApplicationErrorCode(10)!),
-            promise: nil
-        )
-        context.fireChannelRead(data)
     }
 }
 
@@ -975,25 +906,21 @@ final class SyncIntegrationTests: XCTestCase {
             host: host,
             port: 0,
             logger: loggers.serverLogger,
-            inboundConnectionInitializer: { connectionChannel, streamCreator in
-                connectionChannel.eventLoop.makeCompletedFuture {
-                    try connectionChannel.pipeline.syncOperations.addHandler(
-                        HTTPConnectionHandler(
-                            streamCreator: streamCreator,
-                            inboundStreamInitializer: {
-                                $0.closeFuture.whenSuccess {
-                                    let closedCount = serverRequestStreamClosedCount.withLockedValue {
-                                        $0 += 1
-                                        return $0
-                                    }
-                                    if closedCount == requestCount {
-                                        allServerRequestStreamsClosedPromise.succeed()
-                                    }
-                                }
-                                try $0.pipeline.syncOperations.addHandler(TestServerHandler())
-                            }
-                        )
-                    )
+            inboundConnectionInitializer: { connectionChannel, _ in
+                connectionChannel.eventLoop.makeSucceededVoidFuture()
+            },
+            inboundStreamInitializer: { streamChannel in
+                streamChannel.eventLoop.makeCompletedFuture {
+                    streamChannel.closeFuture.whenSuccess {
+                        let closedCount = serverRequestStreamClosedCount.withLockedValue {
+                            $0 += 1
+                            return $0
+                        }
+                        if closedCount == requestCount {
+                            allServerRequestStreamsClosedPromise.succeed()
+                        }
+                    }
+                    try streamChannel.pipeline.syncOperations.addHandler(TestServerHandler())
                 }
             },
             noMoreConnections: {
@@ -1016,11 +943,9 @@ final class SyncIntegrationTests: XCTestCase {
                 remoteAddress: try! .init(ipAddress: host, port: serverPort),
                 connectionInitializer: { connectionChannel, streamCreator in
                     connectionChannel.eventLoop.makeCompletedFuture {
-                        let httpHandler = HTTPConnectionHandler(
-                            streamCreator: streamCreator,
-                            inboundStreamInitializer: { _ in fatalError() }
+                        try connectionChannel.pipeline.syncOperations.addHandler(
+                            HTTPConnectionHandler(streamCreator: streamCreator)
                         )
-                        try connectionChannel.pipeline.syncOperations.addHandler(httpHandler)
                     }
                 },
                 inboundStreamInitializer: { streamChannel in
@@ -1083,25 +1008,21 @@ final class SyncIntegrationTests: XCTestCase {
             host: host,
             port: 0,
             logger: loggers.serverLogger,
-            inboundConnectionInitializer: { connectionChannel, streamCreator in
-                connectionChannel.eventLoop.makeCompletedFuture {
-                    try connectionChannel.pipeline.syncOperations.addHandler(
-                        HTTPConnectionHandler(
-                            streamCreator: streamCreator,
-                            inboundStreamInitializer: {
-                                $0.closeFuture.whenSuccess {
-                                    let closedCount = serverRequestStreamClosedCount.withLockedValue {
-                                        $0 += 1
-                                        return $0
-                                    }
-                                    if closedCount == requestCount {
-                                        allServerRequestStreamsClosedPromise.succeed()
-                                    }
-                                }
-                                try $0.pipeline.syncOperations.addHandler(TestServerHandler())
-                            }
-                        )
-                    )
+            inboundConnectionInitializer: { connectionChannel, _ in
+                connectionChannel.eventLoop.makeSucceededVoidFuture()
+            },
+            inboundStreamInitializer: { streamChannel in
+                streamChannel.eventLoop.makeCompletedFuture {
+                    streamChannel.closeFuture.whenSuccess {
+                        let closedCount = serverRequestStreamClosedCount.withLockedValue {
+                            $0 += 1
+                            return $0
+                        }
+                        if closedCount == requestCount {
+                            allServerRequestStreamsClosedPromise.succeed()
+                        }
+                    }
+                    try streamChannel.pipeline.syncOperations.addHandler(TestServerHandler())
                 }
             },
             noMoreConnections: {
@@ -1124,11 +1045,9 @@ final class SyncIntegrationTests: XCTestCase {
                 remoteAddress: try! .init(ipAddress: host, port: serverPort),
                 connectionInitializer: { connectionChannel, streamCreator in
                     connectionChannel.eventLoop.makeCompletedFuture {
-                        let httpHandler = HTTPConnectionHandler(
-                            streamCreator: streamCreator,
-                            inboundStreamInitializer: { _ in fatalError() }
+                        try connectionChannel.pipeline.syncOperations.addHandler(
+                            HTTPConnectionHandler(streamCreator: streamCreator)
                         )
-                        try connectionChannel.pipeline.syncOperations.addHandler(httpHandler)
                     }
                 },
                 inboundStreamInitializer: { streamChannel in
@@ -1198,26 +1117,22 @@ final class SyncIntegrationTests: XCTestCase {
             host: host,
             port: 0,
             logger: loggers.serverLogger,
-            inboundConnectionInitializer: { connectionChannel, streamCreator in
-                connectionChannel.eventLoop.makeCompletedFuture {
-                    try connectionChannel.pipeline.syncOperations.addHandler(
-                        HTTPConnectionHandler(
-                            streamCreator: streamCreator,
-                            inboundStreamInitializer: {
-                                $0.closeFuture.whenSuccess {
-                                    let closedCount = serverRequestStreamClosedCount.withLockedValue {
-                                        $0 += 1
-                                        return $0
-                                    }
-                                    if closedCount == requestCount {
-                                        allServerRequestStreamsClosedPromise.succeed()
-                                    }
-                                }
-                                try $0.pipeline.syncOperations.addHandler(
-                                    StreamingServerHandler(chunkSize: chunkSize, chunkCount: chunks)
-                                )
-                            }
-                        )
+            inboundConnectionInitializer: { connectionChannel, _ in
+                connectionChannel.eventLoop.makeSucceededVoidFuture()
+            },
+            inboundStreamInitializer: { streamChannel in
+                streamChannel.eventLoop.makeCompletedFuture {
+                    streamChannel.closeFuture.whenSuccess {
+                        let closedCount = serverRequestStreamClosedCount.withLockedValue {
+                            $0 += 1
+                            return $0
+                        }
+                        if closedCount == requestCount {
+                            allServerRequestStreamsClosedPromise.succeed()
+                        }
+                    }
+                    try streamChannel.pipeline.syncOperations.addHandler(
+                        StreamingServerHandler(chunkSize: chunkSize, chunkCount: chunks)
                     )
                 }
             },
@@ -1241,11 +1156,9 @@ final class SyncIntegrationTests: XCTestCase {
                 remoteAddress: try! .init(ipAddress: host, port: serverPort),
                 connectionInitializer: { connectionChannel, streamCreator in
                     connectionChannel.eventLoop.makeCompletedFuture {
-                        let httpHandler = HTTPConnectionHandler(
-                            streamCreator: streamCreator,
-                            inboundStreamInitializer: { _ in fatalError() }
+                        try connectionChannel.pipeline.syncOperations.addHandler(
+                            HTTPConnectionHandler(streamCreator: streamCreator)
                         )
-                        try connectionChannel.pipeline.syncOperations.addHandler(httpHandler)
                     }
                 },
                 inboundStreamInitializer: { streamChannel in
@@ -1304,26 +1217,22 @@ final class SyncIntegrationTests: XCTestCase {
             host: host,
             port: 0,
             logger: loggers.serverLogger,
-            inboundConnectionInitializer: { connectionChannel, streamCreator in
-                connectionChannel.eventLoop.makeCompletedFuture {
-                    try connectionChannel.pipeline.syncOperations.addHandler(
-                        HTTPConnectionHandler(
-                            streamCreator: streamCreator,
-                            inboundStreamInitializer: {
-                                $0.closeFuture.whenSuccess {
-                                    let closedCount = serverRequestStreamClosedCount.withLockedValue {
-                                        $0 += 1
-                                        return $0
-                                    }
-                                    if closedCount == requestCount {
-                                        allServerRequestStreamsClosedPromise.succeed()
-                                    }
-                                }
-                                try $0.pipeline.syncOperations.addHandler(
-                                    StreamingServerHandler(chunkSize: chunkSize, chunkCount: chunks)
-                                )
-                            }
-                        )
+            inboundConnectionInitializer: { connectionChannel, _ in
+                connectionChannel.eventLoop.makeSucceededVoidFuture()
+            },
+            inboundStreamInitializer: { streamChannel in
+                streamChannel.eventLoop.makeCompletedFuture {
+                    streamChannel.closeFuture.whenSuccess {
+                        let closedCount = serverRequestStreamClosedCount.withLockedValue {
+                            $0 += 1
+                            return $0
+                        }
+                        if closedCount == requestCount {
+                            allServerRequestStreamsClosedPromise.succeed()
+                        }
+                    }
+                    try streamChannel.pipeline.syncOperations.addHandler(
+                        StreamingServerHandler(chunkSize: chunkSize, chunkCount: chunks)
                     )
                 }
             },
@@ -1347,11 +1256,9 @@ final class SyncIntegrationTests: XCTestCase {
                 remoteAddress: try! .init(ipAddress: host, port: serverPort),
                 connectionInitializer: { connectionChannel, streamCreator in
                     connectionChannel.eventLoop.makeCompletedFuture {
-                        let httpHandler = HTTPConnectionHandler(
-                            streamCreator: streamCreator,
-                            inboundStreamInitializer: { _ in fatalError() }
+                        try connectionChannel.pipeline.syncOperations.addHandler(
+                            HTTPConnectionHandler(streamCreator: streamCreator)
                         )
-                        try connectionChannel.pipeline.syncOperations.addHandler(httpHandler)
                     }
                 },
                 inboundStreamInitializer: { streamChannel in
@@ -1407,8 +1314,17 @@ final class SyncIntegrationTests: XCTestCase {
             port: 0,
             logger: loggers.serverLogger,
             inboundConnectionInitializer: { connectionChannel, _ in
-                connectionChannel.eventLoop.makeCompletedFuture {
-                    try connectionChannel.pipeline.syncOperations.addHandler(RejectEverythingHTTPConnectionHandler())
+                connectionChannel.eventLoop.makeSucceededVoidFuture()
+            },
+            inboundStreamInitializer: { streamChannel in
+                streamChannel.eventLoop.makeCompletedFuture {
+                    streamChannel.parent?.triggerUserOutboundEvent(
+                        NIOQUICHelpers.QUICCloseConnectionEvent(
+                            code: NIOQUICHelpers.QUICApplicationErrorCode(10)!,
+                            reasonPhrase: "test"
+                        ),
+                        promise: nil
+                    )
                 }
             },
             noMoreConnections: {}
@@ -1431,11 +1347,9 @@ final class SyncIntegrationTests: XCTestCase {
                 remoteAddress: try! .init(ipAddress: host, port: serverPort),
                 connectionInitializer: { connectionChannel, streamCreator in
                     connectionChannel.eventLoop.makeCompletedFuture {
-                        let httpHandler = HTTPConnectionHandler(
-                            streamCreator: streamCreator,
-                            inboundStreamInitializer: { _ in fatalError() }
+                        try connectionChannel.pipeline.syncOperations.addHandler(
+                            HTTPConnectionHandler(streamCreator: streamCreator)
                         )
-                        try connectionChannel.pipeline.syncOperations.addHandler(httpHandler)
                         try connectionChannel.pipeline.syncOperations.addHandler(errorCatcher)
                     }
                 },
@@ -1485,8 +1399,14 @@ final class SyncIntegrationTests: XCTestCase {
             port: 0,
             logger: loggers.serverLogger,
             inboundConnectionInitializer: { connectionChannel, _ in
-                connectionChannel.eventLoop.makeCompletedFuture {
-                    try connectionChannel.pipeline.syncOperations.addHandler(StreamResettingHTTPConnectionHandler())
+                connectionChannel.eventLoop.makeSucceededVoidFuture()
+            },
+            inboundStreamInitializer: { streamChannel in
+                streamChannel.eventLoop.makeCompletedFuture {
+                    streamChannel.triggerUserOutboundEvent(
+                        NIOQUICHelpers.QUICResetStreamEvent(code: NIOQUICHelpers.QUICApplicationErrorCode(10)!),
+                        promise: nil
+                    )
                 }
             },
             noMoreConnections: {}
@@ -1507,11 +1427,9 @@ final class SyncIntegrationTests: XCTestCase {
                 remoteAddress: try! .init(ipAddress: host, port: serverPort),
                 connectionInitializer: { connectionChannel, streamCreator in
                     connectionChannel.eventLoop.makeCompletedFuture {
-                        let httpHandler = HTTPConnectionHandler(
-                            streamCreator: streamCreator,
-                            inboundStreamInitializer: { _ in fatalError() }
+                        try connectionChannel.pipeline.syncOperations.addHandler(
+                            HTTPConnectionHandler(streamCreator: streamCreator)
                         )
-                        try connectionChannel.pipeline.syncOperations.addHandler(httpHandler)
                     }
                 },
                 inboundStreamInitializer: { streamChannel in
@@ -1570,8 +1488,14 @@ final class SyncIntegrationTests: XCTestCase {
             port: 0,
             logger: loggers.serverLogger,
             inboundConnectionInitializer: { connectionChannel, _ in
-                connectionChannel.eventLoop.makeCompletedFuture {
-                    try connectionChannel.pipeline.syncOperations.addHandler(StreamResettingHTTPConnectionHandler())
+                connectionChannel.eventLoop.makeSucceededVoidFuture()
+            },
+            inboundStreamInitializer: { streamChannel in
+                streamChannel.eventLoop.makeCompletedFuture {
+                    streamChannel.triggerUserOutboundEvent(
+                        NIOQUICHelpers.QUICResetStreamEvent(code: NIOQUICHelpers.QUICApplicationErrorCode(10)!),
+                        promise: nil
+                    )
                 }
             },
             noMoreConnections: {}
@@ -1592,11 +1516,9 @@ final class SyncIntegrationTests: XCTestCase {
                 remoteAddress: try! .init(ipAddress: host, port: serverPort),
                 connectionInitializer: { connectionChannel, streamCreator in
                     connectionChannel.eventLoop.makeCompletedFuture {
-                        let httpHandler = HTTPConnectionHandler(
-                            streamCreator: streamCreator,
-                            inboundStreamInitializer: { _ in fatalError() }
+                        try connectionChannel.pipeline.syncOperations.addHandler(
+                            HTTPConnectionHandler(streamCreator: streamCreator)
                         )
-                        try connectionChannel.pipeline.syncOperations.addHandler(httpHandler)
                     }
                 },
                 inboundStreamInitializer: { streamChannel in
@@ -1659,8 +1581,14 @@ final class SyncIntegrationTests: XCTestCase {
             port: 0,
             logger: loggers.serverLogger,
             inboundConnectionInitializer: { connectionChannel, _ in
-                connectionChannel.eventLoop.makeCompletedFuture {
-                    try connectionChannel.pipeline.syncOperations.addHandler(StreamClosingHTTPConnectionHandler())
+                connectionChannel.eventLoop.makeSucceededVoidFuture()
+            },
+            inboundStreamInitializer: { streamChannel in
+                streamChannel.eventLoop.makeCompletedFuture {
+                    streamChannel.triggerUserOutboundEvent(
+                        NIOQUICHelpers.QUICStopSendingEvent(code: NIOQUICHelpers.QUICApplicationErrorCode(10)!),
+                        promise: nil
+                    )
                 }
             },
             noMoreConnections: {}
@@ -1681,11 +1609,9 @@ final class SyncIntegrationTests: XCTestCase {
                 remoteAddress: try! .init(ipAddress: host, port: serverPort),
                 connectionInitializer: { connectionChannel, streamCreator in
                     connectionChannel.eventLoop.makeCompletedFuture {
-                        let httpHandler = HTTPConnectionHandler(
-                            streamCreator: streamCreator,
-                            inboundStreamInitializer: { _ in fatalError() }
+                        try connectionChannel.pipeline.syncOperations.addHandler(
+                            HTTPConnectionHandler(streamCreator: streamCreator)
                         )
-                        try connectionChannel.pipeline.syncOperations.addHandler(httpHandler)
                     }
                 },
                 inboundStreamInitializer: { streamChannel in
@@ -1729,8 +1655,14 @@ final class SyncIntegrationTests: XCTestCase {
             port: 0,
             logger: loggers.serverLogger,
             inboundConnectionInitializer: { connectionChannel, _ in
-                connectionChannel.eventLoop.makeCompletedFuture {
-                    try connectionChannel.pipeline.syncOperations.addHandler(StreamClosingHTTPConnectionHandler())
+                connectionChannel.eventLoop.makeSucceededVoidFuture()
+            },
+            inboundStreamInitializer: { streamChannel in
+                streamChannel.eventLoop.makeCompletedFuture {
+                    streamChannel.triggerUserOutboundEvent(
+                        NIOQUICHelpers.QUICStopSendingEvent(code: NIOQUICHelpers.QUICApplicationErrorCode(10)!),
+                        promise: nil
+                    )
                 }
             },
             noMoreConnections: {}
@@ -1752,10 +1684,7 @@ final class SyncIntegrationTests: XCTestCase {
                 connectionInitializer: { connectionChannel, streamCreator in
                     connectionChannel.eventLoop.makeCompletedFuture {
                         try connectionChannel.pipeline.syncOperations.addHandler(
-                            HTTPConnectionHandler(
-                                streamCreator: streamCreator,
-                                inboundStreamInitializer: { _ in }
-                            )
+                            HTTPConnectionHandler(streamCreator: streamCreator)
                         )
                     }
                 },
@@ -1810,10 +1739,7 @@ final class SyncIntegrationTests: XCTestCase {
                         ConnectionActiveHandler(activePromise: serverConnectionActivePromise)
                     )
                     try connectionChannel.pipeline.syncOperations.addHandler(
-                        HTTPConnectionHandler(
-                            streamCreator: streamCreator,
-                            inboundStreamInitializer: { _ in }
-                        )
+                        HTTPConnectionHandler(streamCreator: streamCreator)
                     )
                     serverConnectionPromise.succeed(connectionChannel)
                 }
@@ -1838,18 +1764,17 @@ final class SyncIntegrationTests: XCTestCase {
                 connectionInitializer: { connectionChannel, streamCreator in
                     connectionChannel.eventLoop.makeCompletedFuture {
                         try connectionChannel.pipeline.syncOperations.addHandler(
-                            HTTPConnectionHandler(
-                                streamCreator: streamCreator,
-                                inboundStreamInitializer: { _ in }
-                            )
-                        )
-                        try connectionChannel.pipeline.syncOperations.addHandler(
-                            StreamClosingHTTPConnectionHandler()
+                            HTTPConnectionHandler(streamCreator: streamCreator)
                         )
                     }
                 },
                 inboundStreamInitializer: { streamChannel in
-                    streamChannel.eventLoop.makeSucceededVoidFuture()
+                    streamChannel.eventLoop.makeCompletedFuture {
+                        streamChannel.triggerUserOutboundEvent(
+                            NIOQUICHelpers.QUICStopSendingEvent(code: NIOQUICHelpers.QUICApplicationErrorCode(10)!),
+                            promise: nil
+                        )
+                    }
                 }
             )
         }.get()
@@ -1905,21 +1830,17 @@ final class SyncIntegrationTests: XCTestCase {
             host: host,
             port: 0,
             logger: loggers.serverLogger,
-            inboundConnectionInitializer: { connectionChannel, streamCreator in
-                connectionChannel.eventLoop.makeCompletedFuture {
-                    try connectionChannel.pipeline.syncOperations.addHandlers([
-                        HTTPConnectionHandler(
-                            streamCreator: streamCreator,
-                            inboundStreamInitializer: { streamInitializer in
-                                streamInitializer.closeFuture.whenSuccess {
-                                    allServerRequestStreamsClosedPromise.succeed()
-                                }
-                                try streamInitializer.pipeline.syncOperations.addHandler(
-                                    TestConnectionIDCycleServerHandler(connectionIDSideChannel: connectionIDSideChannel)
-                                )
-                            }
-                        )
-                    ])
+            inboundConnectionInitializer: { connectionChannel, _ in
+                connectionChannel.eventLoop.makeSucceededVoidFuture()
+            },
+            inboundStreamInitializer: { streamChannel in
+                streamChannel.eventLoop.makeCompletedFuture {
+                    streamChannel.closeFuture.whenSuccess {
+                        allServerRequestStreamsClosedPromise.succeed()
+                    }
+                    try streamChannel.pipeline.syncOperations.addHandler(
+                        TestConnectionIDCycleServerHandler(connectionIDSideChannel: connectionIDSideChannel)
+                    )
                 }
             },
             noMoreConnections: {
@@ -1942,11 +1863,9 @@ final class SyncIntegrationTests: XCTestCase {
                 remoteAddress: try! .init(ipAddress: host, port: serverPort),
                 connectionInitializer: { connectionChannel, streamCreator in
                     connectionChannel.eventLoop.makeCompletedFuture {
-                        let httpHandler = HTTPConnectionHandler(
-                            streamCreator: streamCreator,
-                            inboundStreamInitializer: { _ in fatalError() }
+                        try connectionChannel.pipeline.syncOperations.addHandler(
+                            HTTPConnectionHandler(streamCreator: streamCreator)
                         )
-                        try connectionChannel.pipeline.syncOperations.addHandler(httpHandler)
                     }
                 },
                 inboundStreamInitializer: { streamChannel in
@@ -2000,18 +1919,14 @@ final class SyncIntegrationTests: XCTestCase {
             host: host,
             port: 0,
             logger: loggers.serverLogger,
-            inboundConnectionInitializer: { connectionChannel, streamCreator in
-                connectionChannel.eventLoop.makeCompletedFuture {
-                    try connectionChannel.pipeline.syncOperations.addHandlers([
-                        HTTPConnectionHandler(
-                            streamCreator: streamCreator,
-                            inboundStreamInitializer: { streamInitializer in
-                                try streamInitializer.pipeline.syncOperations.addHandler(
-                                    TestProtocolViolationServerHandler()
-                                )
-                            }
-                        )
-                    ])
+            inboundConnectionInitializer: { connectionChannel, _ in
+                connectionChannel.eventLoop.makeSucceededVoidFuture()
+            },
+            inboundStreamInitializer: { streamChannel in
+                streamChannel.eventLoop.makeCompletedFuture {
+                    try streamChannel.pipeline.syncOperations.addHandler(
+                        TestProtocolViolationServerHandler()
+                    )
                 }
             },
             noMoreConnections: {
@@ -2036,11 +1951,9 @@ final class SyncIntegrationTests: XCTestCase {
                     connectionChannel.eventLoop.makeCompletedFuture {
                         // Capture the client connection's close future
                         connectionChannel.closeFuture.cascade(to: clientConnectionClosedPromise)
-                        let httpHandler = HTTPConnectionHandler(
-                            streamCreator: streamCreator,
-                            inboundStreamInitializer: { _ in fatalError() }
+                        try connectionChannel.pipeline.syncOperations.addHandler(
+                            HTTPConnectionHandler(streamCreator: streamCreator)
                         )
-                        try connectionChannel.pipeline.syncOperations.addHandler(httpHandler)
                     }
                 },
                 inboundStreamInitializer: { streamChannel in
@@ -2090,21 +2003,17 @@ final class SyncIntegrationTests: XCTestCase {
             host: host,
             port: 0,
             logger: loggers.serverLogger,
-            inboundConnectionInitializer: { connectionChannel, streamCreator in
-                connectionChannel.eventLoop.makeCompletedFuture {
-                    try connectionChannel.pipeline.syncOperations.addHandlers([
-                        HTTPConnectionHandler(
-                            streamCreator: streamCreator,
-                            inboundStreamInitializer: { streamInitializer in
-                                streamInitializer.closeFuture.whenSuccess {
-                                    allServerRequestStreamsClosedPromise.succeed()
-                                }
-                                try streamInitializer.pipeline.syncOperations.addHandler(
-                                    TestBufferedDeletionServerHandler()
-                                )
-                            }
-                        )
-                    ])
+            inboundConnectionInitializer: { connectionChannel, _ in
+                connectionChannel.eventLoop.makeSucceededVoidFuture()
+            },
+            inboundStreamInitializer: { streamChannel in
+                streamChannel.eventLoop.makeCompletedFuture {
+                    streamChannel.closeFuture.whenSuccess {
+                        allServerRequestStreamsClosedPromise.succeed()
+                    }
+                    try streamChannel.pipeline.syncOperations.addHandler(
+                        TestBufferedDeletionServerHandler()
+                    )
                 }
             },
             noMoreConnections: {
@@ -2127,11 +2036,9 @@ final class SyncIntegrationTests: XCTestCase {
                 remoteAddress: try! .init(ipAddress: host, port: serverPort),
                 connectionInitializer: { connectionChannel, streamCreator in
                     connectionChannel.eventLoop.makeCompletedFuture {
-                        let httpHandler = HTTPConnectionHandler(
-                            streamCreator: streamCreator,
-                            inboundStreamInitializer: { _ in fatalError() }
+                        try connectionChannel.pipeline.syncOperations.addHandler(
+                            HTTPConnectionHandler(streamCreator: streamCreator)
                         )
-                        try connectionChannel.pipeline.syncOperations.addHandler(httpHandler)
                     }
                 },
                 inboundStreamInitializer: { streamChannel in
@@ -2181,15 +2088,8 @@ final class SyncIntegrationTests: XCTestCase {
             host: host,
             port: 0,
             logger: loggers.serverLogger,
-            inboundConnectionInitializer: { connectionChannel, streamCreator in
-                connectionChannel.eventLoop.makeCompletedFuture {
-                    try connectionChannel.pipeline.syncOperations.addHandler(
-                        HTTPConnectionHandler(
-                            streamCreator: streamCreator,
-                            inboundStreamInitializer: { _ in }
-                        )
-                    )
-                }
+            inboundConnectionInitializer: { connectionChannel, _ in
+                connectionChannel.eventLoop.makeSucceededVoidFuture()
             },
             noMoreConnections: {}
         ).get()
@@ -2210,10 +2110,7 @@ final class SyncIntegrationTests: XCTestCase {
                 connectionInitializer: { connectionChannel, streamCreator in
                     connectionChannel.eventLoop.makeCompletedFuture {
                         try connectionChannel.pipeline.syncOperations.addHandler(
-                            HTTPConnectionHandler(
-                                streamCreator: streamCreator,
-                                inboundStreamInitializer: { _ in }
-                            )
+                            HTTPConnectionHandler(streamCreator: streamCreator)
                         )
                     }
                 },
@@ -2266,17 +2163,13 @@ final class SyncIntegrationTests: XCTestCase {
             host: host,
             port: 0,
             logger: loggers.serverLogger,
-            inboundConnectionInitializer: { connectionChannel, streamCreator in
-                connectionChannel.eventLoop.makeCompletedFuture {
-                    try connectionChannel.pipeline.syncOperations.addHandler(
-                        HTTPConnectionHandler(
-                            streamCreator: streamCreator,
-                            inboundStreamInitializer: { streamChannel in
-                                // Server echoes back and closes output
-                                try streamChannel.pipeline.syncOperations.addHandler(TestServerHandler())
-                            }
-                        )
-                    )
+            inboundConnectionInitializer: { connectionChannel, _ in
+                connectionChannel.eventLoop.makeSucceededVoidFuture()
+            },
+            inboundStreamInitializer: { streamChannel in
+                streamChannel.eventLoop.makeCompletedFuture {
+                    // Server echoes back and closes output
+                    try streamChannel.pipeline.syncOperations.addHandler(TestServerHandler())
                 }
             },
             noMoreConnections: {}
@@ -2298,10 +2191,7 @@ final class SyncIntegrationTests: XCTestCase {
                 connectionInitializer: { connectionChannel, streamCreator in
                     connectionChannel.eventLoop.makeCompletedFuture {
                         try connectionChannel.pipeline.syncOperations.addHandler(
-                            HTTPConnectionHandler(
-                                streamCreator: streamCreator,
-                                inboundStreamInitializer: { _ in }
-                            )
+                            HTTPConnectionHandler(streamCreator: streamCreator)
                         )
                     }
                 },
@@ -2375,10 +2265,14 @@ final class SyncIntegrationTests: XCTestCase {
             port: 0,
             logger: loggers.serverLogger,
             inboundConnectionInitializer: { connectionChannel, _ in
-                connectionChannel.eventLoop.makeCompletedFuture {
+                connectionChannel.eventLoop.makeSucceededVoidFuture()
+            },
+            inboundStreamInitializer: { streamChannel in
+                streamChannel.eventLoop.makeCompletedFuture {
                     // Server immediately sends STOP_SENDING on every inbound stream
-                    try connectionChannel.pipeline.syncOperations.addHandler(
-                        StreamClosingHTTPConnectionHandler()
+                    streamChannel.triggerUserOutboundEvent(
+                        NIOQUICHelpers.QUICStopSendingEvent(code: NIOQUICHelpers.QUICApplicationErrorCode(10)!),
+                        promise: nil
                     )
                 }
             },
@@ -2401,10 +2295,7 @@ final class SyncIntegrationTests: XCTestCase {
                 connectionInitializer: { connectionChannel, streamCreator in
                     connectionChannel.eventLoop.makeCompletedFuture {
                         try connectionChannel.pipeline.syncOperations.addHandler(
-                            HTTPConnectionHandler(
-                                streamCreator: streamCreator,
-                                inboundStreamInitializer: { _ in }
-                            )
+                            HTTPConnectionHandler(streamCreator: streamCreator)
                         )
                     }
                 },
