@@ -1119,7 +1119,7 @@ final class SyncIntegrationTests: XCTestCase {
             logger: loggers.clientLogger
         ).get()
 
-        let (clientConnectionChannel, streamCreator) = try await clientChannel.pipeline.handler(type: QUICHandler.self)
+        let (_, streamCreator) = try await clientChannel.pipeline.handler(type: QUICHandler.self)
             .flatMap {
                 quicHandler in
                 quicHandler.createOutboundConnection(
@@ -1214,7 +1214,7 @@ final class SyncIntegrationTests: XCTestCase {
             logger: loggers.clientLogger
         ).get()
 
-        let (clientConnectionChannel, streamCreator) = try await clientChannel.pipeline.handler(type: QUICHandler.self)
+        let (_, streamCreator) = try await clientChannel.pipeline.handler(type: QUICHandler.self)
             .flatMap {
                 quicHandler in
                 quicHandler.createOutboundConnection(
@@ -1681,7 +1681,7 @@ final class SyncIntegrationTests: XCTestCase {
             logger: loggers.clientLogger
         ).get()
 
-        let (clientConnectionChannel, clientStreamCreator) = try await clientChannel.pipeline.handler(
+        let (clientConnectionChannel, _) = try await clientChannel.pipeline.handler(
             type: QUICHandler.self
         ).flatMap {
             quicHandler in
@@ -1778,7 +1778,7 @@ final class SyncIntegrationTests: XCTestCase {
             logger: loggers.clientLogger
         ).get()
 
-        let (clientConnectionChannel, streamCreator) = try await clientChannel.pipeline.handler(type: QUICHandler.self)
+        let (_, streamCreator) = try await clientChannel.pipeline.handler(type: QUICHandler.self)
             .flatMap {
                 quicHandler in
                 quicHandler.createOutboundConnection(
@@ -1858,7 +1858,7 @@ final class SyncIntegrationTests: XCTestCase {
             logger: loggers.clientLogger
         ).get()
 
-        let (clientConnectionChannel, streamCreator) = try await clientChannel.pipeline.handler(type: QUICHandler.self)
+        let (_, streamCreator) = try await clientChannel.pipeline.handler(type: QUICHandler.self)
             .flatMap {
                 quicHandler in
                 quicHandler.createOutboundConnection(
@@ -1939,7 +1939,7 @@ final class SyncIntegrationTests: XCTestCase {
             logger: loggers.clientLogger
         ).get()
 
-        let (clientConnectionChannel, streamCreator) = try await clientChannel.pipeline.handler(type: QUICHandler.self)
+        let (_, streamCreator) = try await clientChannel.pipeline.handler(type: QUICHandler.self)
             .flatMap {
                 quicHandler in
                 quicHandler.createOutboundConnection(
