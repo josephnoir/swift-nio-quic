@@ -16,14 +16,6 @@ import Logging
 import NIOCore
 @_spi(Essentials) @_spi(ProtocolProvider) import SwiftNetwork
 
-#if canImport(Darwin)
-import Darwin
-#elseif canImport(Glibc)
-import Glibc
-#elseif canImport(Musl)
-import Musl
-#endif
-
 /// The negotiation state of the QUIC datagram extension (RFC 9221) for a connection.
 enum QUICDatagramNegotiationState {
     /// The peer's `max_datagram_frame_size` transport parameter is not yet known.
