@@ -313,9 +313,7 @@ struct DatagramTests {
         // Establish the connection with a tiny sync stream before sending datagrams.
         try await performSyncHandshake(streamCreator, signal: syncSignal, serverReceived: serverGotSync)
 
-        // The connection must stay open for this test; record it if it ever closes. Observing the
-        // close via a callback (not by awaiting `closeFuture`, which ignores task cancellation) keeps
-        // the later grace wait from hanging.
+        // The connection must stay open for this test; record it if it ever closes.
         clientConnectionChannel.closeFuture.whenComplete { _ in
             clientConnectionClosed.withLockedValue { $0 = true }
         }
