@@ -47,7 +47,7 @@ final class QUICDatagramTransport: ProtocolInstanceContainer, InboundDatagramHan
     private var bufferedDatagrams: TinyArray<ByteBuffer> = []
 
     /// The delegate notified of inbound datagrams and errors, set via `setReader(reader:)`.
-    private var quicDatagramReader: any QUICDatagramReaderProtocol?
+    private var quicDatagramReader: (any QUICDatagramReaderProtocol)?
 
     init(role: Role, logger: Logger, context: NetworkContext) {
         self.logPrefix = "[\(role.description)][DatagramHandler]"
