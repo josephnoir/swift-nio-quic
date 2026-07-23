@@ -65,10 +65,22 @@ final class QUICDatagramHandler: ChannelDuplexHandler {
 
     /// Installs a `QUICDatagramProtocol` conforming backend for testing, applying the peer's
     /// advertised `max_datagram_frame_size` the same way `setBackend(to:withPeerMaxDatagramFrameSize:)`
-    /// does. Writes buffered before this call are resolved against `size`.
+    /// does.
     func setTestBackend(to transport: any QUICDatagramProtocol, peerMaxDatagramFrameSize size: Int) {
         transport.setReader(reader: self)
         self.transport = .test(transport)
+        self.setPeerMaxDatagramFrameSize(size)
+    }
+
+    /// Installs a SwiftNetwork-backed transport.
+    ///
+    /// - Parameters:
+    ///   - transport: The transport to send and receive datagrams through.
+    ///   - size: The peer's advertised `max_datagram_frame_size`. `0` means the peer does not
+    ///     accept datagrams. Must be >= 0. Buffered and new packets are verified to stay below this limit.
+    func setBackend(to transport: QUICDatagramTransport, withPeerMaxDatagramFrameSize size: Int) {
+        transport.setReader(reader: self)
+        self.transport = .swiftNetwork(transport)
         self.setPeerMaxDatagramFrameSize(size)
     }
 }
@@ -84,6 +96,8 @@ extension QUICDatagramHandler {
         case none
         /// Installed via `setTestBackend(to:withPeerMaxDatagramFrameSize:)`.
         case test(any QUICDatagramProtocol)
+        /// Installed via `setBackend(to:withPeerMaxDatagramFrameSize:)`.
+        case swiftNetwork(QUICDatagramTransport)
     }
 }
 
@@ -100,6 +114,8 @@ extension QUICDatagramHandler.Transport: QUICDatagramProtocol {
             fatalError("state violation: cannot perform a write before assigning a transport")
         case .test(let testTransport):
             testTransport.write(datagram: datagram)
+        case .swiftNetwork(let swiftNetworkTransport):
+            swiftNetworkTransport.write(datagram: datagram)
         }
     }
 
@@ -110,6 +126,8 @@ extension QUICDatagramHandler.Transport: QUICDatagramProtocol {
             break
         case .test(let testTransport):
             testTransport.flush()
+        case .swiftNetwork(let swiftNetworkTransport):
+            swiftNetworkTransport.flush()
         }
     }
 
@@ -120,6 +138,8 @@ extension QUICDatagramHandler.Transport: QUICDatagramProtocol {
             break
         case .test(let testTransport):
             testTransport.close()
+        case .swiftNetwork(let swiftNetworkTransport):
+            swiftNetworkTransport.close()
         }
     }
 
@@ -132,6 +152,8 @@ extension QUICDatagramHandler.Transport: QUICDatagramProtocol {
             fatalError("state violation: cannot set a reader before assigning a transport")
         case .test(let testTransport):
             testTransport.setReader(reader: reader)
+        case .swiftNetwork(let swiftNetworkTransport):
+            swiftNetworkTransport.setReader(reader: reader)
         }
     }
 }
