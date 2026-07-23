@@ -70,9 +70,6 @@ final class QUICDatagramHandler: ChannelDuplexHandler {
         transport.setReader(reader: self)
         self.transport = .test(transport)
         self.setPeerMaxDatagramFrameSize(size)
-        if let context = self.context {
-            self.flush(context: context)
-        }
     }
 }
 
@@ -256,6 +253,9 @@ extension QUICDatagramHandler {
                     } else {
                         promise?.fail(QUICError.datagramWriteFailed)
                     }
+                }
+                if earlyWrites.count > 0 {
+                    self.transport.flush()
                 }
             }
         case .peerDoesNotAcceptDatagrams:
