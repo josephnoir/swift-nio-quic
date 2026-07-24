@@ -95,8 +95,6 @@ final class SwiftNetworkQUICConnection {
     private var streamInputHandlers: [QUICStreamID: QUICChannelStreamHandler] = [:]
     private var pendingInitialClientStream: QUICChannelStreamHandler?
 
-    private var datagramHandler: QUICDatagramHandler?
-
     private var connectionStateMachine = QUICConnectionStateMachine()
 
     private var finalizedOutput: Deque<ByteBuffer> = []
