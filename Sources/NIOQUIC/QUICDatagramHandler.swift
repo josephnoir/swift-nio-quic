@@ -174,6 +174,7 @@ extension QUICDatagramHandler {
             }
         }
         self.transport.close()
+        self.transport = .none
         self.context = nil
     }
 
