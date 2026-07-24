@@ -43,9 +43,9 @@ final class QUICDatagramTransport: ProtocolInstanceContainer, InboundDatagramHan
             case .none:
                 break
             case .testing(let reader):
-                reader.error(error: error)
+                reader.error(error)
             case .datagramhandler(let handler):
-                handler.error(error: error)
+                handler.error(error)
             }
         }
 
@@ -76,7 +76,7 @@ final class QUICDatagramTransport: ProtocolInstanceContainer, InboundDatagramHan
     /// Datagrams written since the last successful `flush()`.
     private var bufferedDatagrams: TinyArray<ByteBuffer> = []
 
-    /// The delegate notified of inbound datagrams and errors, set via `setReader(reader:)`.
+    /// The delegate notified of inbound datagrams and errors, set via `setReader(_:)`.
     private var quicDatagramReader: Reader = .none
 
     init(role: Role, logger: Logger, context: NetworkContext) {
@@ -158,7 +158,7 @@ extension QUICDatagramTransport: QUICDatagramProtocol {
     /// Register a reader for datagrams.
     ///
     /// This can only hold one endpoint. Each call overwrite the previously set reader.
-    func setReader(reader: any QUICDatagramReaderProtocol) {
+    func setReader(_ reader: any QUICDatagramReaderProtocol) {
         self.quicDatagramReader = .testing(reader)
     }
 }

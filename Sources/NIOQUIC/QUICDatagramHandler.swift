@@ -67,7 +67,7 @@ final class QUICDatagramHandler: ChannelDuplexHandler {
     /// advertised `max_datagram_frame_size` the same way `setBackend(to:withPeerMaxDatagramFrameSize:)`
     /// does.
     func setTestBackend(to transport: any QUICDatagramProtocol, peerMaxDatagramFrameSize size: Int) {
-        transport.setReader(reader: self)
+        transport.setReader(self)
         self.transport = .test(transport)
         self.setPeerMaxDatagramFrameSize(size)
     }
@@ -79,7 +79,7 @@ final class QUICDatagramHandler: ChannelDuplexHandler {
     ///   - size: The peer's advertised `max_datagram_frame_size`. `0` means the peer does not
     ///     accept datagrams. Must be >= 0. Buffered and new packets are verified to stay below this limit.
     func setBackend(to transport: QUICDatagramTransport, withPeerMaxDatagramFrameSize size: Int) {
-        transport.setReader(reader: self)
+        transport.setReader(self)
         self.transport = .swiftNetwork(transport)
         self.setPeerMaxDatagramFrameSize(size)
     }
@@ -146,14 +146,14 @@ extension QUICDatagramHandler.Transport: QUICDatagramProtocol {
     /// Set yourself as a reader of incoming datagrams.
     ///
     /// - Precondition: A backend must have been installed; traps on `.none`.
-    func setReader(reader: any QUICDatagramReaderProtocol) {
+    func setReader(_ reader: any QUICDatagramReaderProtocol) {
         switch self {
         case .none:
             fatalError("state violation: cannot set a reader before assigning a transport")
         case .test(let testTransport):
-            testTransport.setReader(reader: reader)
+            testTransport.setReader(reader)
         case .swiftNetwork(let swiftNetworkTransport):
-            swiftNetworkTransport.setReader(reader: reader)
+            swiftNetworkTransport.setReader(reader)
         }
     }
 }
@@ -239,7 +239,7 @@ extension QUICDatagramHandler: QUICDatagramReaderProtocol {
     }
 
     /// Forwards a transport error into the NIO pipeline.
-    func error(error: any Error) {
+    func error(_ error: any Error) {
         self.context?.fireErrorCaught(error)
     }
 }
