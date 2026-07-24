@@ -112,7 +112,7 @@ public struct QUICConfiguration: Sendable {
     /// Configure verification of the peer's certificate. Only supported by the client.
     public var peerCertificateVerification: CertificateVerification
     /// Maximum datagram frame size in bytes. Set to 0 to disable datagrams.
-    /// Defaults to 65535 (the max value) as recommended in RFC 9221.
+    /// Defaults to 65535 (the max value allowed) as recommended in RFC 9221.
     public var maxDatagramFrameSize: Int
 
     private init(
