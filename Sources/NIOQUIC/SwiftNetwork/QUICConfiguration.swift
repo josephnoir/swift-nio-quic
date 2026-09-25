@@ -114,21 +114,6 @@ public struct QUICConfiguration: Sendable {
     /// Maximum datagram frame size in bytes. Set to 0 to disable datagrams.
     /// Defaults to 65535 (the max value allowed) as recommended in RFC 9221.
     public var maxDatagramFrameSize: Int
-    /// Maximum number of active connections a server will accept, including those still
-    /// completing their handshake. Set to `0` for no limit. Not used by clients.
-    ///
-    /// - Precondition: Must not be negative.
-    public var connectionLimit: Int
-    /// Maximum number of connections that may be mid-handshake at once. Set to `0` for no limit.
-    /// Not used by clients.
-    ///
-    /// - Precondition: Must not be negative.
-    public var handshakeConnectionLimit: Int
-    /// Maximum rate, in new connection attempts per second, at which a server will accept new
-    /// connections. Set to `0` for no limit. Not used by clients.
-    ///
-    /// - Precondition: Must be between `0` and `1_000_000_000`.
-    public var newConnectionRateLimit: Int
 
     private init(
         role: Role,
@@ -150,10 +135,7 @@ public struct QUICConfiguration: Sendable {
         keyLogPath: String?,
         qLogConfiguration: QLogConfiguration?,
         peerCertificateVerification: CertificateVerification,
-        maxDatagramFrameSize: Int,
-        connectionLimit: Int,
-        handshakeConnectionLimit: Int,
-        newConnectionRateLimit: Int
+        maxDatagramFrameSize: Int
     ) {
         self.role = role
         self.serverName = serverName
@@ -175,9 +157,6 @@ public struct QUICConfiguration: Sendable {
         self.qLogConfiguration = qLogConfiguration
         self.peerCertificateVerification = peerCertificateVerification
         self.maxDatagramFrameSize = maxDatagramFrameSize
-        self.connectionLimit = connectionLimit
-        self.handshakeConnectionLimit = handshakeConnectionLimit
-        self.newConnectionRateLimit = newConnectionRateLimit
     }
 
     /// Factory method to initialise a `QUICConfiguration` for servers.
@@ -206,18 +185,9 @@ public struct QUICConfiguration: Sendable {
         sendRetry: Bool = false,
         keyLogPath: String? = nil,
         qLogConfiguration: QLogConfiguration? = nil,
-        maxDatagramFrameSize: Int = 65535,
-        connectionLimit: Int = 0,
-        handshakeConnectionLimit: Int = 0,
-        newConnectionRateLimit: Int = 0
+        maxDatagramFrameSize: Int = 65535
     ) -> Self {
-        precondition(connectionLimit >= 0, "connectionLimit must not be negative")
-        precondition(handshakeConnectionLimit >= 0, "handshakeConnectionLimit must not be negative")
-        precondition(
-            newConnectionRateLimit >= 0 && newConnectionRateLimit <= 1_000_000_000,
-            "newConnectionRateLimit must be between 0 and 1,000,000,000"
-        )
-        return self.init(
+        self.init(
             role: .server,
             serverName: serverName,
             authenticationConfiguration: authenticationConfiguration,
@@ -237,10 +207,7 @@ public struct QUICConfiguration: Sendable {
             keyLogPath: keyLogPath,
             qLogConfiguration: qLogConfiguration,
             peerCertificateVerification: .noVerification,
-            maxDatagramFrameSize: maxDatagramFrameSize,
-            connectionLimit: connectionLimit,
-            handshakeConnectionLimit: handshakeConnectionLimit,
-            newConnectionRateLimit: newConnectionRateLimit
+            maxDatagramFrameSize: maxDatagramFrameSize
         )
     }
 
@@ -292,10 +259,7 @@ public struct QUICConfiguration: Sendable {
             keyLogPath: keyLogPath,
             qLogConfiguration: qLogConfiguration,
             peerCertificateVerification: peerCertificateVerification,
-            maxDatagramFrameSize: maxDatagramFrameSize,
-            connectionLimit: 0,
-            handshakeConnectionLimit: 0,
-            newConnectionRateLimit: 0
+            maxDatagramFrameSize: maxDatagramFrameSize
         )
     }
 }
