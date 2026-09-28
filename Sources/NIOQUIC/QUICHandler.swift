@@ -910,18 +910,27 @@ extension QUICHandler: ChannelInboundHandler where Consumer: ~Copyable {
         }()
 
         connectionLogger.trace("QUICHandler accepting new connection")
-        // The context is set when the channel becomes active so force unwrapping is okay here
-        let quicConnection = try SwiftNetworkQUICConnection<Consumer>.server(
-            configuration: self.quicConfiguration,
-            sourceConnectionID: newSourceConnectionID,
-            statelessResetTokenGenerator: self.statelessResetTokenGenerator,
-            authenticator: self.authenticator,
-            localAddress: localAddress,
-            remoteAddress: addressedEnvelope.remoteAddress,
-            logger: connectionLogger,
-            eventLoop: self.context!.eventLoop,
-            usesStreamTable: self.makeConsumer != nil
-        )
+        let quicConnection: SwiftNetworkQUICConnection<Consumer>
+        do {
+            // The context is set when the channel becomes active so force unwrapping is okay here
+            quicConnection = try SwiftNetworkQUICConnection<Consumer>.server(
+                configuration: self.quicConfiguration,
+                sourceConnectionID: newSourceConnectionID,
+                statelessResetTokenGenerator: self.statelessResetTokenGenerator,
+                authenticator: self.authenticator,
+                localAddress: localAddress,
+                remoteAddress: addressedEnvelope.remoteAddress,
+                logger: connectionLogger,
+                eventLoop: self.context!.eventLoop,
+                usesStreamTable: self.makeConsumer != nil
+            )
+        } catch {
+            // Admission already counted this connection, but its release callbacks are only
+            // registered once it exists. Give the slots back here.
+            self.connectionAdmissionController.finishedHandshake()
+            self.connectionAdmissionController.closingConnection()
+            throw error
+        }
 
         let handle = self.nextConnectionHandle()
 
