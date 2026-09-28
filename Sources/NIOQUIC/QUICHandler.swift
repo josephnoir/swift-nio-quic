@@ -1062,6 +1062,7 @@ extension QUICHandler: ChannelInboundHandler where Consumer: ~Copyable {
             }
 
             channel.closeFuture.assumeIsolated().whenComplete { _ in
+                self.connectionAdmissionController.closingConnection()
                 self.connectionDidClose(handle)
             }
         }
