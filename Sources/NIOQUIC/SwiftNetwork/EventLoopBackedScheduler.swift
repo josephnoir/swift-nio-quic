@@ -54,6 +54,15 @@ final class EventLoopBackedScheduler: NetworkContext.Scheduler {
     private var wakeups: [TimerReference: Wakeup] = [:]
     private let eventLoop: any EventLoop
 
+    var now: NetworkClock.Instant {
+        .zero + .nanoseconds(self.eventLoop.now.uptimeNanoseconds)
+    }
+
+    /// NIO has a single clock, so there is no offset between the continuous and absolute clocks.
+    var nowAbsolute: NetworkClock.Instant {
+        self.now
+    }
+
     internal init(eventLoop: any EventLoop) {
         self.eventLoop = eventLoop
     }
@@ -82,10 +91,10 @@ final class EventLoopBackedScheduler: NetworkContext.Scheduler {
     /// was last scheduled with.
     func schedule(
         _ task: @escaping (() -> Void),
-        milliseconds: Int64,
+        after milliseconds: SwiftNetwork.NetworkDuration,
         reference: SwiftNetwork.TimerReference
     ) {
-        let deadline = self.eventLoop.now + .milliseconds(milliseconds)
+        let deadline = self.eventLoop.now + .milliseconds(milliseconds.roundedUpMilliseconds)
 
         if let index = self.wakeups.index(forKey: reference) {
             let keepWakeup = self._reschedule(
