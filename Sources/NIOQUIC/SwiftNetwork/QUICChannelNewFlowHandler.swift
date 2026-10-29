@@ -57,7 +57,12 @@ final class QUICChannelNewFlowHandler<Consumer: QUICStreamConsumer & ~Copyable>:
     /// Set via ``setConnectionChannel(_:)`` once the connection channel has been created.
     private var connectionChannel: (any Channel)?
 
+    // Private mutable state
+    // This view is set in the call the `start` and is required for operation. It uses
+    // an implicitly unwrapped optionals because Swift's initialization rules prevent
+    // passing 'self' method references during init.
     private var connectionView: SwiftNetworkQUICConnection<Consumer>.NewFlowView!
+
     private var lowerProtocol: BaseStreamListenerLinkage?
     private var datagramListener: BaseDatagramListenerLinkage
 
@@ -220,12 +225,6 @@ final class QUICChannelNewFlowHandler<Consumer: QUICStreamConsumer & ~Copyable>:
     }
 
     /// Unused: nothing calls this witness on this type, so it only throws `ENOTSUP`.
-    ///
-    /// `init` attaches this handler to the stream listener with `invokeAttachUpperProtocol`, which
-    /// calls nothing back, and keeps the listener as `lowerProtocol` itself. The stream table's
-    /// linkages, the datagram transport and outbound stream handlers attach with
-    /// `invokeAttachUpperProtocolToNewFlow` instead, which hands them the new flow through this
-    /// witness, and theirs complete the attach.
     func invokeAttachLowerProtocol(
         _ lowerProtocol: BaseStreamListenerLinkage,
         remote: SwiftNetwork.Endpoint?,

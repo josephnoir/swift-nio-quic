@@ -384,8 +384,6 @@ struct QUICConnectionPathTests {
         #expect(connection._forTesting_getOtherPaths().isEmpty)
     }
 
-    /// A read loop starts batching outbound writes in the entry that delivers its input, rather than
-    /// in an entry of its own, and stops when it exits.
     @available(anyAppleOS 26, *)
     @Test
     func readLoopBatchesOutboundWritesFromItsInputEntry() throws {

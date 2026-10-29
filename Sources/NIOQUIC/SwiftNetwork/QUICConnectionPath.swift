@@ -194,9 +194,7 @@ extension QUICConnectionPath: ProtocolInstance where Consumer: ~Copyable {}
 @available(anyAppleOS 26, *)
 extension QUICConnectionPath where Consumer: ~Copyable {
     // The framework's answer for its own lower protocols: connected once this path delivered its
-    // connected event, and no longer once it delivered its disconnected event or was released. So QUIC
-    // connects its first path like every later one, and counts neither a path it hasn't connected yet
-    // nor one it destroyed.
+    // connected event, and no longer once it delivered its disconnected event or was released.
     func protocolIsConnected(in eventContext: inout NetworkContext.EventContext) -> Bool {
         self.identifier.isConnected(in: &eventContext)
     }
@@ -267,9 +265,8 @@ extension QUICConnectionPath where Consumer: ~Copyable {
     }
 
     func teardown(in eventContext: inout NetworkContext.EventContext) {
-        // Nothing to release beyond what `detach` deliberately keeps. This path still owns its
-        // event manager's registration, though, and nothing below it retires that on its behalf:
-        // unregister, or the event manager traps when it's released.
+        // Nothing to release beyond what `detach` deliberately keeps.
+        // Just unregister the event manager as it traps when it's released.
         self.unregisterEventManager(in: &eventContext)
     }
 

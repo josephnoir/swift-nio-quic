@@ -1639,9 +1639,8 @@ extension QUICChannelStreamHandler: Channel, ChannelCore {
 // MARK: - Queued callouts
 //
 // The stack's events reach this handler while the event context is held, so the pipeline events
-// and promise completions they cause are queued (see `QUICCallouts`) and delivered here once it's
-// released. Like NIO's own channels, the pipeline sees nothing after its close, and `isActive`
-// changes as `channelActive` and `channelInactive` are delivered.
+// and promise completions they cause are queued (see `QUICCallouts`) and delivered through these
+// calls once the event context was released.
 
 @available(anyAppleOS 26, *)
 extension QUICChannelStreamHandler {
@@ -1692,19 +1691,20 @@ extension QUICChannelStreamHandler {
         self.pipeline.fireErrorCaught(error)
     }
 
-    /// As NIO's channels do: the state first, then the close promise, then the events. A stream closed
-    /// before it ever became active doesn't see `channelInactive`: it didn't see `channelActive`.
     func deliverClose(promise: EventLoopPromise<Void>?, error: (any Error)?) {
         if self.isPipelineClosed {
             promise?.succeed()
             return
         }
+        // As NIO's channels do: update the state first, then the close promise, then the events.
         self.isPipelineClosed = true
         let wasActive = self._isActive.exchange(false, ordering: .sequentiallyConsistent)
         promise?.succeed()
         if let error {
             self.pipeline.fireErrorCaught(error)
         }
+        // A stream closed before it ever became active doesn't see `channelInactive` since it did
+        // not see `channelActive` either.
         if wasActive {
             self.pipeline.fireChannelInactive()
             self.pipeline.fireChannelUnregistered()

@@ -15,6 +15,7 @@
 import NIOConcurrencyHelpers
 import NIOCore
 import NIOQUICHelpers
+import Synchronization
 import Testing
 
 @testable import NIOQUIC
@@ -766,11 +767,11 @@ struct StreamTableTests {
             // No FIN, so the stream is still open when the connection is forced closed.
             let handle = try await pair.openClientStream(writing: ByteBuffer(string: "GET /quic"), fin: false)
 
-            // What the registry does once a graceful shutdown overruns its deadline.
             let channel = try #require(pair.clientConnection.channel as? QUICConnectionChannel<RecordConsumer>)
             try await channel.eventLoop.submit {
                 channel.transportView.forceClose()
             }.get()
+
             // Completes once the channel has torn down, which retires the table's anchor.
             try await channel.closeFuture.get()
 
@@ -790,9 +791,6 @@ struct StreamTableTests {
         }
     }
 
-    /// A consumer may leave streams unpulled, so a forced close tears down streams still attached
-    /// to their flows. Closing one makes the stack report its disconnect before the close returns,
-    /// while the table tears its slots down: that event must find nothing.
     @available(anyAppleOS 26, *)
     @Test
     func forceClosingUnpulledStreamsDropsTheirEvents() async throws {
@@ -965,9 +963,6 @@ struct StreamTableTests {
         }
     }
 
-    /// Each stream's linkage holds its table, and the stack holds the linkages: closing the
-    /// connections must still release both tables. One stream finishes before the close, and one
-    /// is still open at it.
     @available(anyAppleOS 26, *)
     @Test
     func closingTheConnectionsReleasesTheirStreamTables() async throws {
@@ -1019,30 +1014,32 @@ private struct IdleConsumer: QUICStreamConsumer {
 }
 
 /// Tells whether an object has been released, without keeping it alive.
-///
-/// `@unchecked Sendable`: its state is only read and written under `lock`, so the event loop that
-/// observes the object and the test's task that checks on it don't race. The reference is weak on
-/// purpose: a probe that held the object would keep it alive.
-private final class ReleaseProbe: @unchecked Sendable {
-    private let lock: NIOLock
-    private weak var object: AnyObject?
-    private var hasObserved: Bool
+@available(anyAppleOS 26, *)
+private final class ReleaseProbe: Sendable {
+
+    /// Only read and written under `lock`, so the event loop that observes the
+    /// object and the test's task that checks on it don't race. The reference is
+    /// weak on purpose: a probe that held the object would keep it alive.
+    struct ObservedObject: @unchecked Sendable {
+        weak var object: AnyObject?
+        var hasObserved: Bool
+    }
+
+    private let state: Mutex<ObservedObject>
 
     init() {
-        self.lock = NIOLock()
-        self.object = nil
-        self.hasObserved = false
+        self.state = Mutex<ObservedObject>(.init(object: nil, hasObserved: false))
     }
 
     func observe(_ object: AnyObject) {
-        self.lock.withLock {
-            self.object = object
-            self.hasObserved = true
+        self.state.withLock { state in
+            state.object = object
+            state.hasObserved = true
         }
     }
 
     /// Whether the observed object has been released: `false` until something was observed.
     var isReleased: Bool {
-        self.lock.withLock { self.hasObserved && self.object == nil }
+        self.state.withLock { $0.hasObserved && $0.object == nil }
     }
 }

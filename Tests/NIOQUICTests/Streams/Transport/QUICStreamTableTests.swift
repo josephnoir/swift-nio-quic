@@ -589,8 +589,6 @@ struct QUICStreamTableTests {
         table.closeAll(error: nil, disconnect: nil, into: &consumer)
     }
 
-    /// A stream's linkage outlives its slot: the stack holds it until the flow detaches and its
-    /// queued events run. An event through it must then not reach the stream that took the slot over.
     @available(anyAppleOS 26, *)
     @Test
     func eventsThroughAStaleLinkageAreDropped() {
@@ -616,8 +614,6 @@ struct QUICStreamTableTests {
         table.closeAll(error: nil, disconnect: nil, into: &consumer)
     }
 
-    /// Closing a stream disconnects it from its flow, and the stack can deliver the stream's events
-    /// before that call returns. While the table vacates the stream's slot, they must find nothing.
     @available(anyAppleOS 26, *)
     @Test
     func eventsDeliveredWhileAStreamIsVacatedAreDropped() {
@@ -636,8 +632,6 @@ struct QUICStreamTableTests {
         table.closeAll(error: nil, disconnect: nil, into: &consumer)
     }
 
-    /// A consumer may stop pulling, so `closeAll` tears the streams it didn't pull down all at once.
-    /// Events the stack delivers meanwhile must find nothing.
     @available(anyAppleOS 26, *)
     @Test
     func eventsDeliveredWhileAllSlotsAreTornDownAreDropped() {
@@ -655,8 +649,6 @@ struct QUICStreamTableTests {
         #expect(table.count == 0)
     }
 
-    /// Closing one stream can make the stack report events for another before the close returns.
-    /// While the table tears all its slots down, those must find nothing either.
     @available(anyAppleOS 26, *)
     @Test
     func eventsForOtherStreamsDeliveredWhileAllSlotsAreTornDownAreDropped() {
@@ -688,8 +680,6 @@ struct QUICStreamTableTests {
 
     // MARK: - Reading
 
-    /// Each pull enters the stack. Nothing follows a FIN, so a read that brings one pulls once; any
-    /// other read pulls again to find the stack has nothing more.
     @available(anyAppleOS 26, *)
     @Test(arguments: [true, false])
     func readPullsAgainOnlyWithoutTheFin(fin: Bool) {

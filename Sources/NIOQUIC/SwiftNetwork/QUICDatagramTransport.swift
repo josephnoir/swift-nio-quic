@@ -153,9 +153,8 @@ extension QUICDatagramTransport where Consumer: ~Copyable {
 @available(anyAppleOS 26, *)
 extension QUICDatagramTransport where Consumer: ~Copyable {
     /// Receives the datagram flow's linkage, delivered synchronously from inside
-    /// `attachDatagramFlow`'s call to `invokeAttachUpperProtocolToNewFlow`, and completes the
-    /// pairing: an external upper makes the second leg of the attach itself, which is what sets
-    /// the flow up in QUIC, including its usable datagram size.
+    /// `attachDatagramFlow`'s call to `invokeAttachUpperProtocolToNewFlow`,
+    /// and completes the pairing.
     func invokeAttachLowerProtocol(
         _ lowerProtocol: BaseOutboundDatagramLinkage,
         remote: SwiftNetwork.Endpoint?,

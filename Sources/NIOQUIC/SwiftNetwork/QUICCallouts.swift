@@ -17,18 +17,17 @@ import NIOCore
 import NIOQUICHelpers
 @_spi(Essentials) @_spi(ProtocolProvider) import SwiftNetwork
 
-/// The calls a connection makes into NIO and consumer code on the stack's behalf, queued while the
-/// stack holds the connection's event context and run once it's released.
+/// The calls a connection makes into NIO and consumer code when entering from SwiftNetwork are queued
+/// while the stack holds the connection's `EventContext` and run once it's released.
 ///
 /// SwiftNetwork's `NetworkContext.EventContext` is an exclusive token: acquiring it while it's held
 /// traps. NIO's pipeline is synchronous and re-entrant: code NIOQUIC calls into (a handler reacting
 /// to a `channelRead`, a promise callback, a stream initializer) can call straight back into
-/// NIOQUIC, which then needs the token again. So NIOQUIC never makes such calls while the token is
-/// held:
+/// NIOQUIC and through to Swift Network, which then needs the token again. So NIOQUIC never makes
+/// such calls while the token is held:
 ///
-/// - Code that holds the token, recognisable by its `inout NetworkContext.EventContext` parameter
-///   and including every witness the stack calls, updates NIOQUIC's own state and queues the call
-///   with ``add(_:in:)`` instead of making it.
+/// - Code that holds the token (recognisable by its `inout NetworkContext.EventContext` parameter)
+///   updates NIOQUIC's own state and queues the call with ``add(_:in:)``.
 /// - Whoever acquired the token runs the queue once it's released. NIOQUIC's entry points acquire
 ///   through ``enter(as:_:)``, which runs the queue on the way out. Framework entry points that
 ///   acquire the token themselves (attaching flows and paths, metadata setters such as keep-alive)
@@ -37,14 +36,10 @@ import NIOQUICHelpers
 ///   `EventLoopBackedScheduler`, which runs the queue after each of them.
 ///
 /// So NIO and consumer code only run with nothing held, NIOQUIC's entry points always acquire the
-/// token afresh, and the queued calls run in order, in the event loop tick that queued them. A call
-/// whose code enters the stack again (a handler's `flush()`, say) gets the calls that entry queues
-/// before it returns; the rest of the queue runs after it.
+/// token afresh, and the queued calls run in order, in the event loop tick that queued them.
 ///
-/// Consumer code that still runs with the token held, because NIOQUIC needs its result there: the
-/// connection ID and stateless reset token generators. They must not call into NIOQUIC.
-///
-/// There is one queue per `NetworkContext`, so one per connection.
+/// Consumer code that runs with the token held because NIOQUIC needs its result must not call
+/// into NIOQUIC: the connection ID and stateless reset token generators.
 @available(anyAppleOS 26, *)
 final class QUICCallouts {
     private var queue: Deque<QUICCallout>
@@ -67,9 +62,7 @@ final class QUICCallouts {
     }
 
     #if DEBUG
-    /// Whether the stack may hold the event context: inside ``enter(as:_:)``, ``callFramework(_:)``
-    /// or a scheduler task. Debug builds check it when calls are queued and when the stack is
-    /// entered, and in the stream channel's pipeline.
+    /// Whether the stack may hold the event context.
     var isInsideStack: Bool {
         self.stackDepth > 0
     }
@@ -77,7 +70,7 @@ final class QUICCallouts {
 
     /// Queues `callout` to run once the event context is released.
     ///
-    /// Takes the event context only to show the caller holds it: whoever acquired it runs the queue.
+    /// - Precondition: Must only be called from inside the stack.
     func add(_ callout: QUICCallout, in eventContext: inout NetworkContext.EventContext) {
         #if DEBUG
         assert(
@@ -92,9 +85,10 @@ final class QUICCallouts {
     /// Runs `body` with the connection's event context, entering the stack as `instance`, then runs
     /// the calls queued meanwhile, before returning or rethrowing.
     ///
-    /// Must be called with nothing held, as it is wherever NIO or consumer code calls into NIOQUIC.
-    /// Enter as the NIOQUIC instance that makes the call, never as a framework instance it calls
-    /// into: a down-call requires its callee to be idle, and entering as the callee makes it busy.
+    /// Enter as the NIOQUIC instance that makes the calls, never as a framework instance it calls
+    /// into: a down-call needs an idle callee, and entering as the callee makes it busy.
+    ///
+    /// - Precondition: Must be called with no event context held.
     @inline(__always)
     func enter<Instance: ProtocolInstance, Value, Failure: Error>(
         as instance: Instance,
@@ -111,7 +105,7 @@ final class QUICCallouts {
     /// Calls a framework entry point that acquires the event context itself, then runs the calls its
     /// witnesses queued meanwhile, before returning or rethrowing.
     ///
-    /// Must be called with nothing held, like ``enter(as:_:)``.
+    /// - Precondition: Must be called with no event context held.
     @inline(__always)
     func callFramework<Value, Failure: Error>(_ body: () throws(Failure) -> Value) throws(Failure) -> Value {
         self.willEnterStack()
@@ -124,6 +118,8 @@ final class QUICCallouts {
 
     /// Runs a task the stack scheduled, inside which it acquires the event context itself, then the
     /// calls queued meanwhile.
+    ///
+    /// - Precondition: Must be called with no event context held.
     func runStackTask(_ task: () -> Void) {
         self.willEnterStack()
         task()

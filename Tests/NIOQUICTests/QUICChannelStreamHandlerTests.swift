@@ -385,8 +385,6 @@ struct QUICChannelStreamHandlerTests {
         }
     }
 
-    /// A disconnected event must flip `_isActive` before the entry that delivered it returns;
-    /// deferring races the multiplexer's `removeHandlers` and drops `fireChannelInactive`.
     @available(anyAppleOS 26, *)
     @Test("A disconnected event flips _isActive before its entry returns")
     func disconnectedEventFlipsIsActiveBeforeItsEntryReturns() throws {
@@ -416,8 +414,6 @@ struct QUICChannelStreamHandlerTests {
         }
     }
 
-    /// An idle timeout closes the connection silently (RFC 9000, Section 10.1), and the connection
-    /// treats it as a clean close: so do its streams. Any other error still reaches the pipeline.
     @available(anyAppleOS 26, *)
     @Test("A disconnect closes the stream with its error, unless it's an idle timeout", arguments: [true, false])
     func disconnectErrorReachesThePipelineUnlessItsAnIdleTimeout(idleTimeout: Bool) throws {
@@ -440,9 +436,8 @@ struct QUICChannelStreamHandlerTests {
         }
     }
 
-    /// As NIO's channels do, the channel is already inactive when its close promise completes.
     @available(anyAppleOS 26, *)
-    @Test("The close promise completes with the channel already inactive")
+    @Test("The close promise completes when the channel is already inactive")
     func closePromiseCompletesWithTheChannelInactive() throws {
         try Self.withServerStream { streamChannel in
             streamChannel._isActive.store(true, ordering: .sequentiallyConsistent)
@@ -459,8 +454,6 @@ struct QUICChannelStreamHandlerTests {
         }
     }
 
-    /// Like NIO's own channels, a stream channel delivers nothing after `channelInactive`: a handler
-    /// that closes the stream from `channelRead` sees no `channelReadComplete` after it.
     @available(anyAppleOS 26, *)
     @Test("Closing a stream from channelRead delivers nothing after channelInactive")
     func closingFromChannelReadDeliversNothingAfterInactive() throws {
@@ -479,9 +472,6 @@ struct QUICChannelStreamHandlerTests {
         }
     }
 
-    /// The stack reports data available once per frame. Several frames for one stream in one batch
-    /// make one read burst: the first report satisfies the pending read, and the later ones queue
-    /// nothing more. Bytes already buffered when the burst is delivered go with it.
     @available(anyAppleOS 26, *)
     @Test("Several data events in one batch make one read burst")
     func severalDataEventsInOneBatchMakeOneReadBurst() throws {
@@ -503,9 +493,6 @@ struct QUICChannelStreamHandlerTests {
         }
     }
 
-    /// `isActive` follows the events the pipeline has seen, as on NIO's channels: it turns true as
-    /// `channelActive` is delivered, not when the stack connects the stream. A stream closed before its
-    /// activation is delivered sees neither event.
     @available(anyAppleOS 26, *)
     @Test("isActive follows the delivered events", arguments: [false, true])
     func isActiveFollowsTheDeliveredEvents(closedFirst: Bool) throws {
@@ -530,8 +517,6 @@ struct QUICChannelStreamHandlerTests {
         }
     }
 
-    /// A stream the application closes stays attached until its flow's disconnect arrives, after
-    /// all ACKs. The flow delivers that event to the handler, so it must still be registered then.
     @available(anyAppleOS 26, *)
     @Test("A stream closed while attached unregisters only once its flow's disconnect detaches it")
     func closedStreamUnregistersOnceDetached() throws {
@@ -549,7 +534,6 @@ struct QUICChannelStreamHandlerTests {
         }
     }
 
-    /// As above, when `stop` detaches the stream instead of its flow's disconnect.
     @available(anyAppleOS 26, *)
     @Test("A stream closed while attached unregisters once stop detaches it")
     func closedStreamUnregistersOnceStopDetachesIt() throws {

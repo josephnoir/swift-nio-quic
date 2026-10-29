@@ -2222,10 +2222,6 @@ extension QUICStreamPipelineStateMachine.State {
 }
 
 /// The handle a QUIC stream uses to talk to the SwiftNetwork transport stack.
-///
-/// A stream attaches to its flow once, and detaches from it when it's torn down: a table stream
-/// when its core closes, a channel stream when its flow disconnects or the stream stops. Only an
-/// attached handle has a linkage to call, and the identifier to make the calls from.
 @available(anyAppleOS 26, *)
 struct SwiftNetworkStreamHandle: ~Copyable {
     enum State: ~Copyable {
@@ -2286,9 +2282,9 @@ struct SwiftNetworkStreamHandle: ~Copyable {
     // MARK: - Wrapper methods
     //
     // Every wrapper here returns an action that, on the success path, carries
-    // a *value snapshot* of the attached linkage (`BaseOutboundStreamLinkage` is a
-    // `struct`) and identifier. Callers extract them from the action, which releases the borrow on
-    // the handle, and then perform the SwiftNetwork side
+    // a *value snapshot* of the attached linkage (`BaseOutboundStreamLinkage` is
+    // a `struct`) and identifier. Callers extract them from the action, which
+    // releases the borrow on the handle, and then perform the SwiftNetwork side
     // effect on the local values. This is load-bearing: SwiftNetwork's
     // `handleCallFromUpperProtocol` drains queued peer events in a `defer`
     // after `body()`, so a peer disconnect can synchronously re-enter

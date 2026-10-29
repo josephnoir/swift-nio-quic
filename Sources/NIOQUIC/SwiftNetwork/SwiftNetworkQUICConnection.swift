@@ -181,10 +181,6 @@ final class SwiftNetworkQUICConnection<Consumer: QUICStreamConsumer & ~Copyable>
     }
 
     /// Starts batching outbound writes for the read loop, unless it already has.
-    ///
-    /// Called from the entry that delivers the read loop's input rather than from an entry of its
-    /// own: QUIC holds back only the application's writes, and none run before that input is
-    /// delivered.
     private func startOutboundBatching(in eventContext: inout NetworkContext.EventContext) {
         if !self.inReadLoop || self.batchingEnabled { return }
         guard let newFlowHandler = self.connectionNewFlowHandler else { return }
@@ -610,9 +606,7 @@ final class SwiftNetworkQUICConnection<Consumer: QUICStreamConsumer & ~Copyable>
         }
 
         // Attach the datagram flow with nothing held, before any packet is processed, so that it
-        // exists before any DATAGRAM frame can arrive: QUIC gives a frame that finds no flow an
-        // inbound flow of its own, which nothing here attaches to, and the datagram is lost. After
-        // the new-flow handler's start, which installs the view its connection events are handed to.
+        // exists before any DATAGRAM frame can arrive.
         if let transport = newFlowHandler.attachDatagramFlow() {
             self.setDatagramTransport(.live(transport))
         }
@@ -1186,14 +1180,13 @@ final class SwiftNetworkQUICConnection<Consumer: QUICStreamConsumer & ~Copyable>
         if !path.hasQueuedInboundPackets {
             return
         }
-        // Destroying a QUIC path releases its path here, after which nothing consumes the queue. Serving one
-        // path can destroy another: a migration destroys the path it leaves.
+        // Destroying a QUIC path releases its path here, after which nothing consumes the queue.
         if path.identifier.isNone {
             path.finalizeQueuedInboundFramesAsFailed()
             return
         }
-        // Delivers upward from the path, which requires it to be mid-call: enter as it. The path has
-        // its own event state, so QUIC is idle for the batching down-call.
+        // Delivers upward from the path, which requires it to be mid-call: enter as it. That leaves
+        // QUIC idle for the batching down-call.
         self.callouts.enter(as: path) { eventContext in
             self.startOutboundBatching(in: &eventContext)
             path.invokeInputAvailable(in: &eventContext)
@@ -1481,7 +1474,7 @@ extension SwiftNetworkQUICConnection where Consumer: ~Copyable {
 
         // Generate additional CIDs for the peer after handshake completes.
         if self.channelView != nil {
-            // The datagram flow was attached in `start`: tell the channel the peer's advertised size.
+            // The datagram flow was attached in `start`. Tell the channel the peer's advertised size.
             // This completes datagram writes buffered before the handshake and flushes them.
             let peerMaxDatagramFrameSize = self.peerMaxDatagramFrameSize(in: &eventContext)
             self.callouts.add(
@@ -1526,8 +1519,9 @@ extension SwiftNetworkQUICConnection where Consumer: ~Copyable {
         }
     }
 
-    /// The peer's advertised `max_datagram_frame_size`, or `0` if the peer does not accept datagrams
-    /// (or the datagram flow could not be attached, so none can be sent).
+    /// The peer's advertised `max_datagram_frame_size`.
+    ///
+    /// Note: Returns `0` if the peer does not accept datagrams (or the datagram flow could not be attached, so none can be sent).
     private func peerMaxDatagramFrameSize(in eventContext: inout NetworkContext.EventContext) -> Int {
         if self.datagramTransport == nil {
             return 0
@@ -1894,7 +1888,7 @@ extension SwiftNetworkQUICConnection where Consumer: ~Copyable {
     ///   Telling it enters the stack, so then this must be called with no event context held.
     // TODO: The validation requirement will not hold once active path events are available.
     private func removePath(_ path: QUICConnectionPath<Consumer>, notifySwiftNetwork: Bool) {
-        if !self.stopTracking(path) {
+        guard self.stopTracking(path) else {
             return
         }
         // A path SwiftNetwork already released needs no notification, and can't be entered any more.
@@ -1915,7 +1909,7 @@ extension SwiftNetworkQUICConnection where Consumer: ~Copyable {
         _ path: QUICConnectionPath<Consumer>,
         notifyingSwiftNetworkIn eventContext: inout NetworkContext.EventContext
     ) {
-        if !self.stopTracking(path) {
+        guard self.stopTracking(path) else {
             return
         }
         if !path.identifier.isNone {
@@ -2138,9 +2132,8 @@ extension SwiftNetworkQUICConnection where Consumer: ~Copyable {
     /// reader.
     ///
     /// The transport holds this connection until it is closed, which happens as part of the
-    /// connection's teardown. A transport this replaces is closed first: tests install a double over
-    /// the one `start` attached, whose flow would otherwise stay attached, and the transport
-    /// registered, for the life of the QUIC instance. Must be called with no event context held.
+    /// connection's teardown. A transport this replaces is closed first. Must be called with
+    /// no event context held.
     func setDatagramTransport(_ transport: DatagramTransport) {
         switch self.datagramTransport {
         case .live(let replaced)?:
@@ -2206,7 +2199,7 @@ extension SwiftNetworkQUICConnection: QUICConnectionProtocol where Consumer: ~Co
         if let datagramTransport = self.datagramTransport {
             return datagramTransport.write(datagram: datagram)
         } else {
-            // No datagram flow: attaching it failed, or the connection has torn down.
+            // No datagram flow.
             return false
         }
     }

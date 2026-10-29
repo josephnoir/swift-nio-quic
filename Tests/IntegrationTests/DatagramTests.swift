@@ -716,10 +716,10 @@ struct DatagramTests {
     }
 
     /// Attaching a stream's flow needs no event context held, and a datagram's `channelRead` runs
-    /// once the connection has released it: a stream opened from there opens right away.
+    /// once the connection has released it.
     ///
-    /// Unidirectional, because the first bidirectional stream a client opens reuses the stream the
-    /// connection created up front, which attaches no new flow.
+    /// Unidirectional: a client's first bidirectional stream reuses the one the connection created
+    /// up front, which attaches no new flow.
     @available(anyAppleOS 26, *)
     @Test
     func streamOpenedFromADatagramReadOpens() async throws {

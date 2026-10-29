@@ -336,10 +336,6 @@ extension QUICStreamTable where Consumer: ~Copyable {
 
 // MARK: - Stack events
 
-/// What the stack's events for a stream do, reported by the stream's `QUICStreamUpperLinkage`.
-///
-/// Each drops an event that doesn't find its stream attached: the stream hasn't attached yet or
-/// has left the table, its slot holds another stream, or the table is tearing all its slots down.
 @available(anyAppleOS 26, *)
 extension QUICStreamTable where Consumer: ~Copyable {
     /// The transport state of `handle`'s stream, if the stack's events for it are handled.
@@ -571,7 +567,7 @@ extension QUICStreamTable where Consumer: ~Copyable {
     }
 
     /// As ``vacateSlot(_:in:)``, but acquires the event context itself, and releases the consumer's
-    /// state for the stream only once that acquisition has ended: the state's deinit is consumer code.
+    /// state for the stream only once that acquisition has ended.
     func vacateSlot(_ handle: QUICStreamHandle) {
         let state = self.takeConsumerState(for: handle)
         self.withEventContext { eventContext in
@@ -582,7 +578,7 @@ extension QUICStreamTable where Consumer: ~Copyable {
     }
 
     /// Moves the consumer's state for `handle`'s stream out of the table, for the caller to release
-    /// once no event context is held: its deinit is consumer code.
+    /// once no event context is held.
     private func takeConsumerState(for handle: QUICStreamHandle) -> Consumer.StreamState? {
         if self._transportStates.pointer(for: handle) == nil {
             return nil

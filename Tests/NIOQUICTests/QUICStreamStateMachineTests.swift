@@ -1438,8 +1438,6 @@ struct SwiftNetworkStreamHandleTests {
         #expect(isAttached)
     }
 
-    /// Before the attach there is nothing to call: disconnect, the aborts and metadata are ignored,
-    /// and connect, send and receive report a violation.
     @available(anyAppleOS 26, *)
     @Test("An unattached handle makes no calls")
     func unattachedHandleMakesNoCalls() {
@@ -1475,7 +1473,6 @@ struct SwiftNetworkStreamHandleTests {
         }
     }
 
-    /// Closing a stream whose attach failed detaches it without a call to the stack.
     @available(anyAppleOS 26, *)
     @Test("invokeDetach skips an unattached handle and detaches it")
     func invokeDetachSkipsAnUnattachedHandle() {
