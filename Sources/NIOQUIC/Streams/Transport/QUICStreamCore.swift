@@ -202,8 +202,6 @@ extension QUICStreamCore {
     ///   - body: Provided a contiguous block of bytes received from the remote peer, returning how
     ///     many of them it consumed. May be called more then once for each call to `read`.
     /// - Returns: The outcome of the read.
-    @_spi(Essentials) @_spi(ProtocolProvider)
-    @usableFromInline
     mutating func read(
         minContiguous: Int,
         withEventContext: (_ pull: (inout NetworkContext.EventContext) -> Int) -> Int,
@@ -497,8 +495,6 @@ extension QUICStreamCore {
     /// Note that this returns `0` until the stack has assigned the stream its ID, which is not the
     /// same as no room: writes may be queued before then, but flushing them is refused until the
     /// ID arrives.
-    @_spi(Essentials) @_spi(ProtocolProvider)
-    @usableFromInline
     func writableBytes(in eventContext: inout NetworkContext.EventContext) -> Int {
         switch self.handle.invokeSendStreamData() {
         case .proceed(let linkage, let identifier):
@@ -563,8 +559,6 @@ extension QUICStreamCore {
     ///   dropped; if the stack rejected the write; or if the flush happened before the stack
     ///   assigned the stream its ID, in which case the queue is left as it was so the flush can be
     ///   repeated.
-    @_spi(Essentials) @_spi(ProtocolProvider)
-    @usableFromInline
     mutating func flush(fin: Bool, in eventContext: inout NetworkContext.EventContext) throws {
         if self.pendingWrites.isEmpty && !fin { return }
 
@@ -664,8 +658,6 @@ extension QUICStreamCore {
     /// Resets the send side of the stream.
     ///
     /// - Parameter code: The application error code to send in RESET\_STREAM.
-    @_spi(Essentials) @_spi(ProtocolProvider)
-    @usableFromInline
     mutating func sendResetStream(code: QUICApplicationErrorCode, in eventContext: inout NetworkContext.EventContext) {
         let action: QUICStreamStateMachine.LocalResetAction
 
@@ -690,8 +682,6 @@ extension QUICStreamCore {
     /// Closes the receive side of the stream.
     ///
     /// - Parameter code: The application error code to send in STOP_SENDING.
-    @_spi(Essentials) @_spi(ProtocolProvider)
-    @usableFromInline
     mutating func sendStopSending(code: QUICApplicationErrorCode, in eventContext: inout NetworkContext.EventContext) {
         let action: QUICStreamStateMachine.CloseReadSideAction
 
