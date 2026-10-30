@@ -718,7 +718,8 @@ struct DatagramTests {
         try await serverChannel.close()
     }
 
-    /// A stream opened from a datagram's `channelRead` opens right away.
+    /// Attaching a stream's flow needs no event context held, and a datagram's `channelRead` runs
+    /// once the connection has released it.
     ///
     /// Unidirectional: a client's first bidirectional stream reuses the one the connection created
     /// up front, which attaches no new flow.
