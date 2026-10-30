@@ -91,10 +91,15 @@ protocol QUICConnectionProtocol {
 extension QUICConnectionChannel where Consumer: ~Copyable {
     /// The channel's connection, either the real SwiftNetwork-backed connection
     /// (statically dispatched) or an existential test conformance.
+    ///
+    /// Its members are always inlined: the `test` case's existential makes the enum address-only, so
+    /// from unspecialized code every call to one of them would first look up the enum's metadata, which
+    /// the member never reads.
     enum Connection {
         case live(SwiftNetworkQUICConnection<Consumer>)
         case test(any QUICConnectionProtocol)
 
+        @inline(__always)
         func withLiveOnly(
             promise: EventLoopPromise<Void>? = nil,
             execute body: (SwiftNetworkQUICConnection<Consumer>) throws -> Void
@@ -116,6 +121,7 @@ extension QUICConnectionChannel where Consumer: ~Copyable {
 
 @available(anyAppleOS 26, *)
 extension QUICConnectionChannel.Connection: QUICConnectionProtocol where Consumer: ~Copyable {
+    @inline(__always)
     var localAddress: SocketAddress {
         switch self {
         case .live(let connection):
@@ -125,6 +131,7 @@ extension QUICConnectionChannel.Connection: QUICConnectionProtocol where Consume
         }
     }
 
+    @inline(__always)
     var remoteAddress: SendableAddress {
         switch self {
         case .live(let connection):
@@ -135,6 +142,7 @@ extension QUICConnectionChannel.Connection: QUICConnectionProtocol where Consume
     }
 
     @discardableResult
+    @inline(__always)
     func receivePacket(_ envelope: AddressedEnvelope<ByteBuffer>) -> Int {
         switch self {
         case .live(let connection):
@@ -144,6 +152,7 @@ extension QUICConnectionChannel.Connection: QUICConnectionProtocol where Consume
         }
     }
 
+    @inline(__always)
     func receivePacketsComplete() {
         switch self {
         case .live(let connection):
@@ -153,6 +162,7 @@ extension QUICConnectionChannel.Connection: QUICConnectionProtocol where Consume
         }
     }
 
+    @inline(__always)
     func drainPacketsToSend(to transport: some QUICTransport) {
         switch self {
         case .live(let connection):
@@ -162,6 +172,7 @@ extension QUICConnectionChannel.Connection: QUICConnectionProtocol where Consume
         }
     }
 
+    @inline(__always)
     func close(isApplicationClose: Bool, errorCode: Int64, reason: String) -> Bool {
         switch self {
         case .live(let connection):
@@ -179,6 +190,7 @@ extension QUICConnectionChannel.Connection: QUICConnectionProtocol where Consume
         }
     }
 
+    @inline(__always)
     func closeAllStreams() -> [EventLoopFuture<Void>] {
         switch self {
         case .live(let connection):
@@ -188,6 +200,7 @@ extension QUICConnectionChannel.Connection: QUICConnectionProtocol where Consume
         }
     }
 
+    @inline(__always)
     func writeDatagram(_ datagram: ByteBuffer) -> Bool {
         switch self {
         case .live(let connection):
@@ -197,6 +210,7 @@ extension QUICConnectionChannel.Connection: QUICConnectionProtocol where Consume
         }
     }
 
+    @inline(__always)
     func flushDatagrams() {
         switch self {
         case .live(let connection):
@@ -206,6 +220,7 @@ extension QUICConnectionChannel.Connection: QUICConnectionProtocol where Consume
         }
     }
 
+    @inline(__always)
     func quiesceStreams() {
         switch self {
         case .live(let connection):
@@ -215,6 +230,7 @@ extension QUICConnectionChannel.Connection: QUICConnectionProtocol where Consume
         }
     }
 
+    @inline(__always)
     func dropChannelReferences() {
         switch self {
         case .live(let connection):

@@ -35,10 +35,16 @@ protocol QUICTransport {
 
 @available(anyAppleOS 26, *)
 extension QUICConnectionChannel where Consumer: ~Copyable {
+    /// The channel's transport: ``QUICHandler/ChildView``, or a test double.
+    ///
+    /// Its members are always inlined: the `test` case's existential makes the enum address-only, so
+    /// from unspecialized code every call to one of them would first look up the enum's metadata, which
+    /// the member never reads.
     enum Transport: QUICTransport {
         case live(QUICHandler<Consumer>.ChildView)
         case test(any QUICTransport)
 
+        @inline(__always)
         func writeDatagram(_ envelope: AddressedEnvelope<ByteBuffer>, promise: EventLoopPromise<Void>?) {
             switch self {
             case .live(let transport):
@@ -48,6 +54,7 @@ extension QUICConnectionChannel where Consumer: ~Copyable {
             }
         }
 
+        @inline(__always)
         func flush() {
             switch self {
             case .live(let transport):
@@ -57,6 +64,7 @@ extension QUICConnectionChannel where Consumer: ~Copyable {
             }
         }
 
+        @inline(__always)
         func read() {
             switch self {
             case .live(let transport):
