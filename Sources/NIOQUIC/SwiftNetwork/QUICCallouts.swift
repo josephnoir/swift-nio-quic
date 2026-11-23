@@ -182,7 +182,7 @@ enum QUICCallout {
     )
     /// Completes a promise.
     case completePromise(EventLoopPromise<Void>, Result<Void, any Error>)
-    /// A call into the connection channel.
+    /// A call into the connection or its channel.
     case connection(any QUICConnectionCalloutTarget, QUICConnectionCallout)
     /// Sets the QUIC connection's keep-alive interval, in seconds. The setter is a framework entry
     /// point that acquires the event context itself.
@@ -218,7 +218,7 @@ enum QUICCallout {
     }
 }
 
-/// A call into the connection channel. See ``QUICCallout/connection(_:_:)``.
+/// A call into the connection or its channel. See ``QUICCallout/connection(_:_:)``.
 @available(anyAppleOS 27, *)
 enum QUICConnectionCallout {
     /// The handshake completed. The peer accepts datagrams up to the given size, none if it's zero.
@@ -233,6 +233,9 @@ enum QUICConnectionCallout {
     case datagramRead(ByteBuffer)
     /// The connection's datagram flow failed, for an `errorCaught`.
     case datagramError(any Error)
+    /// Tears the connection's state down, a framework entry point that acquires the event context
+    /// itself. Queued so that the stack reports the rest of the read batch first.
+    case tearDown
 }
 
 /// The connection a ``QUICConnectionCallout`` runs on. `SwiftNetworkQUICConnection` is generic over

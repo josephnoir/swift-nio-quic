@@ -704,6 +704,13 @@ final class QUICChannelStreamHandler: ExternalInboundStreamLinkage, @unchecked S
         in eventContext: inout NetworkContext.EventContext
     ) {
         self.log("handleDisconnectedEvent error: \(String(describing: error))")
+        // The stack may report data it read for the stream only after this, and nothing can read it from
+        // the stack once the stream detached. Deliver what it holds now, whether a read is outstanding or
+        // not: the stream is closing.
+        if self.pipelineStateMachine.isInitialized {
+            _ = self.read(in: &eventContext)
+            self.streamRead(in: &eventContext)
+        }
         switch self.swiftNetworkStreamHandle.invokeDetach() {
         case .proceed(let linkage, let identifier):
             do throws(NetworkError) {

@@ -1536,15 +1536,17 @@ extension SwiftNetworkQUICConnection where Consumer: ~Copyable {
             // SwiftNetwork manages the draining timeout per RFC 9000 §10.2.2 internally.
             // By the time this handler is called, the draining period is complete and
             // we can safely finalize the connection closure.
+            // The stack may report what it read for the streams in the same batch as the peer's close
+            // only after this, so the teardown, which stops the streams, waits for it.
             let action = self.connectionStateMachine.completeDraining()
             switch action {
             case .finalizeClosure:
                 self.logger.trace("Finalizing connection closure after draining")
-                self.tearDownConnectionState(in: &eventContext)
+                self.callouts.add(.connection(self, .tearDown), in: &eventContext)
             case .alreadyClosed:
                 // Connection went directly to closed (e.g., failed during handshake)
                 self.logger.trace("Connection already closed, tearing down state")
-                self.tearDownConnectionState(in: &eventContext)
+                self.callouts.add(.connection(self, .tearDown), in: &eventContext)
             case .notDraining:
                 self.logger.warning("Unexpected state when completing draining")
             }
@@ -2157,6 +2159,13 @@ extension SwiftNetworkQUICConnection: QUICConnectionCalloutTarget where Consumer
             self.channelView?.datagramRead(datagram)
         case .datagramError(let error):
             self.channelView?.datagramError(error)
+        case .tearDown:
+            // A close from the channel in the meantime may have torn the state down already.
+            if let newFlowHandler = self.connectionNewFlowHandler {
+                self.callouts.enter(as: newFlowHandler) { eventContext in
+                    self.tearDownConnectionState(in: &eventContext)
+                }
+            }
         }
     }
 }
